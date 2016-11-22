@@ -64,6 +64,7 @@ public class DefaultPodSpec implements PodSpec {
     private DefaultPodSpec(Builder builder) {
         this(builder.type, builder.user, builder.count, builder.container,
                 builder.tasks, builder.placementRule, builder.resources);
+        ValidationUtils.validate(this);
     }
 
     public static Builder newBuilder() {
@@ -237,7 +238,6 @@ public class DefaultPodSpec implements PodSpec {
          */
         public DefaultPodSpec build() {
             DefaultPodSpec defaultPodSpec = new DefaultPodSpec(this);
-            ValidationUtils.validate(defaultPodSpec);
             return defaultPodSpec;
         }
     }
