@@ -17,3 +17,6 @@ project(":frameworks/kafka").name = "kafka"
 
 include 'frameworks/hdfs'
 project(":frameworks/hdfs").name = "hdfs"
+
+include 'frameworks/mongodb-replicaset'
+project(":frameworks/mongodb-replicaset").name = "mongodb-replicaset"
