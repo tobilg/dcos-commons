@@ -1,0 +1,53 @@
+#!/bin/bash
+
+set -m
+
+# Gather the MongoDB endpoints from the Marathon API like this: host1:27017
+curl -s -H "Content-Type: application/json" http://master.mesos:5050/state | $MESOS_SANDBOX/jq-linux64 -r '.frameworks[] | select(.name | contains( "{{APP_NAME}}")) | .tasks[] | select(.name | contains("server")) | .statuses[0].container_status.network_infos[0].ip_addresses[0].ip_address + ":27017"' > mongodb-instances.txt
+
+# Show contents of curl result
+echo "Found MongoDB instances:"
+cat mongodb-instances.txt
+
+# Read the MongoDB endpoints as array
+IFS=$'\n' read -d '' -r -a MONGODB_ENDPOINTS < mongodb-instances.txt
+
+echo "Printing the environment:"
+env
+
+# Check the replica set status. 1 means already initialized.
+REPLSET_STATUS=$($MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --quiet --eval "rs.status()" | sed -e 's/: [a-zA-Z]*(\(.*\))/: "\1"/' | sed -e 's/\"\"/\"/g' | $MESOS_SANDBOX/jq-linux64 -r '.ok')
+
+# Check if replica set has been initialized yet
+if [ "$REPLSET_STATUS" == "1" ]; then
+    echo "The ReplicaSet has already been initialized!"
+    # If so, sleep forever .-)
+    # Workaround because task state FINISHED is not yet supported
+    echo "Now we're starting out eternal sleep!"
+    sleep 10000000000
+else
+    echo "Using ${MONGODB_ENDPOINTS[0]} to initialize the ReplicaSet!"
+
+    # Connect to the first endpoint and initilize the ReplicaSet
+    $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.initiate()"
+
+    # Sleep for 5 seconds
+    sleep {{ADD_DELAY}}
+
+    # Process the other nodes -> add to ReplicaSet
+    for endpoint in "${MONGODB_ENDPOINTS[@]:1}"; do
+        echo "Adding endpoint $endpoint to the ReplicaSet"
+        $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.add('$endpoint')"
+        sleep {{ADD_DELAY}}
+    done
+
+    # Check the ReplicaSet's status
+    echo "Printing the ReplicaSet status:"
+    $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "printjson(rs.status())"
+
+    # If so, sleep forever .-)
+    # Workaround because task state FINISHED is not yet supported
+    echo "Now we're starting out eternal sleep!"
+    sleep 10000000000
+
+fi
