@@ -14,7 +14,7 @@
   "licenses": [
     {
       "name": "MIT License",
-      "url": "https://github.com/tobilg/dcos-commons/tree/mongodb-replicaset/frameworks/mongodb-replicaset/LICENSE"
+      "url": "https://raw.githubusercontent.com/tobilg/dcos-commons/mongodb-replicaset/frameworks/mongodb-replicaset/LICENSE"
     }
   ]
 }
