@@ -60,7 +60,7 @@ public class DefaultPlanGenerator implements PlanGenerator {
                         .map(taskSpec -> taskSpec.getName())
                         .collect(Collectors.toList());
                 for (TaskSpec taskSpec : taskSpecs) {
-                    if (taskSpec.getGoal() == GoalState.RUNNING) {
+                    if (taskSpec.getGoal() == GoalState.RUNNING || taskSpec.getGoal() == GoalState.FINISHED) {
                         steps.add(from(podInstance, taskNames));
                     }
                 }

@@ -52,7 +52,7 @@ public class DefaultPhaseFactory implements PhaseFactory {
             PodInstance podInstance = new DefaultPodInstance(podSpec, i);
 
             List<String> tasksToLaunch = podInstance.getPod().getTasks().stream()
-                    .filter(taskSpec -> taskSpec.getGoal().equals(GoalState.RUNNING))
+                    .filter(taskSpec -> (taskSpec.getGoal().equals(GoalState.RUNNING) || taskSpec.getGoal().equals(GoalState.FINISHED)))
                     .map(taskSpec -> taskSpec.getName())
                     .collect(Collectors.toList());
 
