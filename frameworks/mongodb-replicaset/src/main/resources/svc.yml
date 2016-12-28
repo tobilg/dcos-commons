@@ -33,7 +33,7 @@ pods:
       replicaset:
         cpus: {{INIT_CPUS}}
         memory: {{INIT_MEM}}
-        goal: RUNNING
+        goal: FINISHED
         cmd: "chmod +x $MESOS_SANDBOX/init.sh && chmod +x $MESOS_SANDBOX/jq-linux64 && exec $MESOS_SANDBOX/init.sh"
         uris:
           - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.2.11.tgz"
