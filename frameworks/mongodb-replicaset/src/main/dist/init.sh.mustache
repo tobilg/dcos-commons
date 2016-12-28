@@ -21,10 +21,6 @@ REPLSET_STATUS=$($MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_
 # Check if replica set has been initialized yet
 if [ "$REPLSET_STATUS" == "1" ]; then
     echo "The ReplicaSet has already been initialized!"
-    # If so, sleep forever .-)
-    # Workaround because task state FINISHED is not yet supported
-    echo "Now we're starting out eternal sleep!"
-    sleep 10000000000
 else
     echo "Using ${MONGODB_ENDPOINTS[0]} to initialize the ReplicaSet!"
 
@@ -44,10 +40,5 @@ else
     # Check the ReplicaSet's status
     echo "Printing the ReplicaSet status:"
     $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "printjson(rs.status())"
-
-    # If so, sleep forever .-)
-    # Workaround because task state FINISHED is not yet supported
-    echo "Now we're starting out eternal sleep!"
-    sleep 10000000000
 
 fi
