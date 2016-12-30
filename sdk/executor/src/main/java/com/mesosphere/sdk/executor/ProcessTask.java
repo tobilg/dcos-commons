@@ -1,15 +1,29 @@
 package com.mesosphere.sdk.executor;
 
-import org.apache.commons.lang3.SerializationUtils;
 import org.apache.mesos.ExecutorDriver;
 import org.apache.mesos.Protos;
+import org.apache.mesos.Protos.TaskInfo;
+
+import com.github.mustachejava.DefaultMustacheFactory;
+import com.github.mustachejava.Mustache;
+import com.github.mustachejava.MustacheFactory;
 import com.mesosphere.sdk.offer.CommonTaskUtils;
-import com.mesosphere.sdk.offer.TaskException;
+import com.mesosphere.sdk.specification.ConfigFileSpecification;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.StringReader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+
 import java.time.Duration;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.*;
 
 /**
@@ -17,7 +31,6 @@ import java.util.concurrent.*;
  */
 public class ProcessTask implements ExecutorTask {
     private static final Logger LOGGER = LoggerFactory.getLogger(ProcessTask.class);
-    private final String taskType;
     private final ProcessBuilder processBuilder;
     private final ExecutorDriver driver;
     private final Protos.TaskInfo taskInfo;
@@ -32,20 +45,21 @@ public class ProcessTask implements ExecutorTask {
     // TODO(mohit): Remove this when KillPolicy is available.
     private static final Duration TERMINATE_TIMEOUT = Duration.ofSeconds(10);
 
-    public static ProcessTask create(ExecutorDriver executorDriver, Protos.TaskInfo taskInfo)
-            throws IOException {
+    public static ProcessTask create(ExecutorDriver executorDriver, Protos.TaskInfo taskInfo) {
         return create(executorDriver, taskInfo, true);
     }
 
-    public static ProcessTask create(ExecutorDriver executorDriver, Protos.TaskInfo taskInfo, boolean exitOnTermination)
-            throws IOException {
+    public static ProcessTask create(
+            ExecutorDriver executorDriver,
+            Protos.TaskInfo taskInfo,
+            boolean exitOnTermination) {
         return create(executorDriver, taskInfo, CommonTaskUtils.getProcess(taskInfo), exitOnTermination);
     }
 
     public static ProcessTask create(
             ExecutorDriver executorDriver,
             Protos.TaskInfo taskInfo,
-            ProcessBuilder processBuilder) throws IOException {
+            ProcessBuilder processBuilder) {
         return create(executorDriver, taskInfo, processBuilder, true);
     }
 
@@ -53,7 +67,7 @@ public class ProcessTask implements ExecutorTask {
             ExecutorDriver executorDriver,
             Protos.TaskInfo taskInfo,
             ProcessBuilder processBuilder,
-            boolean exitOnTermination) throws IOException {
+            boolean exitOnTermination) {
         return new ProcessTask(executorDriver, taskInfo, processBuilder, exitOnTermination);
     }
 
@@ -65,20 +79,11 @@ public class ProcessTask implements ExecutorTask {
             ExecutorDriver executorDriver,
             Protos.TaskInfo taskInfo,
             ProcessBuilder processBuilder,
-            boolean exitOnTermination) throws IOException {
+            boolean exitOnTermination) {
         this.driver = executorDriver;
         this.taskInfo = taskInfo;
-        String taskTypeTest;
-        try {
-            taskTypeTest = CommonTaskUtils.getType(taskInfo);
-        } catch (TaskException e) {
-            taskTypeTest = ""; // not found
-        }
-        this.taskType = taskTypeTest;
         this.processBuilder = processBuilder;
         this.exitOnTermination = exitOnTermination;
-
-        CommonTaskUtils.setupConfigFiles(taskInfo);
     }
 
     public void preStart() {
@@ -88,6 +93,9 @@ public class ProcessTask implements ExecutorTask {
     @Override
     public void run() {
         try {
+
+            setupConfigFiles(taskInfo);
+
             preStart();
 
             LOGGER.info("Executing command: {}", processBuilder.command());
@@ -134,7 +142,11 @@ public class ProcessTask implements ExecutorTask {
             LOGGER.info(exitMessage);
             if (exitOnTermination) {
                 LOGGER.info("Executor is exiting because exitOnTermination: " + exitOnTermination);
-                System.exit(ExecutorErrorCode.EXIT_ON_TERMINATION_SUCCESS.ordinal());
+                if (exitValue == 0) {
+                    driver.stop();
+                } else {
+                    driver.abort();
+                }
             }
         } catch (Throwable e) {
             LOGGER.error("Process task failed.", e);
@@ -146,10 +158,9 @@ public class ProcessTask implements ExecutorTask {
                     taskInfo.getTaskId(),
                     taskInfo.getSlaveId(),
                     taskInfo.getExecutor().getExecutorId(),
-                    e.getMessage(),
-                    SerializationUtils.serialize(e));
+                    e.getMessage());
             if (exitOnTermination) {
-                System.exit(ExecutorErrorCode.EXIT_ON_TERMINATION_FAILURE.ordinal());
+                driver.abort();
             }
         }
     }
@@ -247,4 +258,61 @@ public class ProcessTask implements ExecutorTask {
         }
     }
 
+    /**
+     * Sets up the config files on the executor side.
+     *
+     * @param taskInfo The {@link TaskInfo} to extract the config file data from
+     * @throws IOException if the data in the taskInfo is not valid or the config can't be written to disk
+     */
+    private static void setupConfigFiles(TaskInfo taskInfo) throws IOException {
+        // When populating config template, use taskinfo env + container env (taskinfo gets priority)
+        final Map<String, String> environment = new TreeMap<>();
+        environment.putAll(System.getenv());
+        environment.putAll(CommonTaskUtils.fromEnvironmentToMap(taskInfo.getCommand().getEnvironment()));
+        for (ConfigFileSpecification configFileSpecification : CommonTaskUtils.getConfigFiles(taskInfo)) {
+            writeConfigFile(
+                    configFileSpecification.getRelativePath(),
+                    configFileSpecification.getTemplateContent(),
+                    environment);
+        }
+    }
+
+    /**
+     * Injects the proper data into the given config template and writes the populated template to disk.
+     *
+     * @param relativePath    The path to write the file
+     * @param templateContent The content of the config template
+     * @param environment     The environment from which to extract the injection data
+     * @throws IOException if the data can't be written to disk
+     */
+    private static void writeConfigFile(
+            String relativePath,
+            String templateContent,
+            Map<String, String> environment) throws IOException {
+        LOGGER.info("Writing config file: {} ({} bytes)", relativePath, templateContent.length());
+
+        File configFile = new File(relativePath);
+        if (!configFile.exists()) {
+            try {
+                configFile.createNewFile();
+            } catch (IOException e) {
+                throw new IOException(String.format("Can't create config file %s: %s", relativePath, e));
+            }
+        }
+
+        Writer writer = null;
+        try {
+            writer = new BufferedWriter(new OutputStreamWriter(
+                    new FileOutputStream(relativePath), StandardCharsets.UTF_8));
+            MustacheFactory mf = new DefaultMustacheFactory();
+            Mustache mustache = mf.compile(new StringReader(templateContent), "configTemplate");
+            mustache.execute(writer, environment);
+            writer.close();
+        } catch (IOException e) {
+            if (writer != null) {
+                writer.close();
+            }
+            throw new IOException(String.format("Can't write to file %s: %s", relativePath, e));
+        }
+    }
 }
