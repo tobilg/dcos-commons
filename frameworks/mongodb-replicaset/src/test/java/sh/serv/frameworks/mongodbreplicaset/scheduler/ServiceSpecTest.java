@@ -30,7 +30,7 @@ public class ServiceSpecTest {
 
     @BeforeClass
     public static void beforeAll() {
-        environmentVariables.set("DCOS_SERVICE_NAME", "mongodb-replicaset");
+        environmentVariables.set("MARATHON_APP_LABEL_DCOS_SERVICE_NAME", "inf-mongodb-replicaset");
         environmentVariables.set("EXECUTOR_URI", "");
         environmentVariables.set("PORT0", "8080");
         environmentVariables.set("MONGODB_COUNT", "3");

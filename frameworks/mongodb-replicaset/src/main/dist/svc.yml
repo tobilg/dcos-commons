@@ -1,5 +1,5 @@
-name: "mongodb-replicaset"
-principal: "mongodb-replicaset-principal"
+name: "{{MARATHON_APP_LABEL_DCOS_SERVICE_NAME}}"
+principal: "{{MARATHON_APP_LABEL_DCOS_SERVICE_NAME}}-principal"
 zookeeper: master.mesos:2181
 api-port: {{PORT0}}
 pods:
@@ -23,9 +23,17 @@ pods:
       server:
         resource-set: mongodb-resources
         goal: RUNNING
-        cmd: "env && exec $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongod --bind_ip $LIBPROCESS_IP --port 27017 --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}}"
+        cmd: "env && exec $MESOS_SANDBOX/mongodb-linux-x86_64-3.4.1/bin/mongod --bind_ip $LIBPROCESS_IP --port 27017 --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}}"
+        health-check:
+          name: "mongodb-server-health-check"
+          cmd: "curl --fail ${LIBPROCESS_IP}:27017 > /dev/null"
+          interval: 30
+          grace-period: 60
+          max-consecutive-failures: 5
+          delay: 5
+          timeout: 5
         uris:
-          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.2.11.tgz"
+          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.4.1.tgz"
 
   init:
     count: {{INIT_COUNT}}
@@ -36,7 +44,7 @@ pods:
         goal: FINISHED
         cmd: "chmod +x $MESOS_SANDBOX/init.sh && chmod +x $MESOS_SANDBOX/jq-linux64 && exec $MESOS_SANDBOX/init.sh"
         uris:
-          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.2.11.tgz"
+          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.4.1.tgz"
           - "https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64"
         configurations:
           - template: "{{CONFIG_TEMPLATE_PATH}}/init.sh.mustache"

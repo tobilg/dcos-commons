@@ -16,7 +16,7 @@ echo "Printing the environment:"
 env
 
 # Check the replica set status. 1 means already initialized.
-REPLSET_STATUS=$($MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --quiet --eval "rs.status()" | sed -e 's/: [a-zA-Z]*(\(.*\))/: "\1"/' | sed -e 's/\"\"/\"/g' | $MESOS_SANDBOX/jq-linux64 -r '.ok')
+REPLSET_STATUS=$($MESOS_SANDBOX/mongodb-linux-x86_64-3.4.1/bin/mongo ${MONGODB_ENDPOINTS[0]} --quiet --eval "rs.status()" | sed -e 's/: [a-zA-Z]*(\(.*\))/: "\1"/' | sed -e 's/\"\"/\"/g' | $MESOS_SANDBOX/jq-linux64 -r '.ok')
 
 # Check if replica set has been initialized yet
 if [ "$REPLSET_STATUS" == "1" ]; then
@@ -25,7 +25,7 @@ else
     echo "Using ${MONGODB_ENDPOINTS[0]} to initialize the ReplicaSet!"
 
     # Connect to the first endpoint and initilize the ReplicaSet
-    $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.initiate()"
+    $MESOS_SANDBOX/mongodb-linux-x86_64-3.4.1/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.initiate()"
 
     # Sleep for 5 seconds
     sleep {{ADD_DELAY}}
@@ -33,12 +33,12 @@ else
     # Process the other nodes -> add to ReplicaSet
     for endpoint in "${MONGODB_ENDPOINTS[@]:1}"; do
         echo "Adding endpoint $endpoint to the ReplicaSet"
-        $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.add('$endpoint')"
+        $MESOS_SANDBOX/mongodb-linux-x86_64-3.4.1/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.add('$endpoint')"
         sleep {{ADD_DELAY}}
     done
 
     # Check the ReplicaSet's status
     echo "Printing the ReplicaSet status:"
-    $MESOS_SANDBOX/mongodb-linux-x86_64-3.2.11/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "printjson(rs.status())"
+    $MESOS_SANDBOX/mongodb-linux-x86_64-3.4.1/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "printjson(rs.status())"
 
 fi
