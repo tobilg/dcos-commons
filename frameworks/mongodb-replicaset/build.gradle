@@ -1,5 +1,5 @@
-group 'de.sharelytics'
-version '1.0-SNAPSHOT'
+group 'sh.serv'
+version '0.1.0-SNAPSHOT'
 
 apply plugin: 'java'
 apply plugin: 'application'
