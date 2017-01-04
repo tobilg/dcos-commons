@@ -1,5 +1,5 @@
-name: "{{MARATHON_APP_LABEL_DCOS_SERVICE_NAME}}"
-principal: "{{MARATHON_APP_LABEL_DCOS_SERVICE_NAME}}-principal"
+name: "{{SERVICE_NAME}}"
+principal: "{{SERVICE_NAME}}-principal"
 zookeeper: master.mesos:2181
 api-port: {{PORT0}}
 pods:
@@ -11,10 +11,10 @@ pods:
         memory: {{MONGODB_MEM}}
         ports:
           - name: "mongodb-port"
-            port: 27017
+            port: {{MONGODB_PORT}}
             vip:
-              prefix: "mongodb-replicaset"
-              port: 27017
+              prefix: "{{SERVICE_NAME}}"
+              port: {{MONGODB_PORT}}
         volumes:
           - path: "mongodb-replicaset"
             type: ROOT
@@ -23,17 +23,17 @@ pods:
       server:
         resource-set: mongodb-resources
         goal: RUNNING
-        cmd: "env && exec $MESOS_SANDBOX/mongodb-linux-x86_64-3.4.1/bin/mongod --bind_ip $LIBPROCESS_IP --port 27017 --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}}"
+        cmd: "env && exec $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongod --bind_ip $LIBPROCESS_IP --port {{MONGODB_PORT}} --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}}"
         health-check:
           name: "mongodb-server-health-check"
-          cmd: "curl --fail ${LIBPROCESS_IP}:27017 > /dev/null"
+          cmd: "curl --fail ${LIBPROCESS_IP}:{{MONGODB_PORT}} > /dev/null"
           interval: 30
           grace-period: 60
           max-consecutive-failures: 5
           delay: 5
           timeout: 5
         uris:
-          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.4.1.tgz"
+          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-{{MONGODB_VERSION}}.tgz"
 
   init:
     count: {{INIT_COUNT}}
@@ -44,14 +44,17 @@ pods:
         goal: FINISHED
         cmd: "chmod +x $MESOS_SANDBOX/init.sh && chmod +x $MESOS_SANDBOX/jq-linux64 && exec $MESOS_SANDBOX/init.sh"
         uris:
-          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-3.4.1.tgz"
+          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-{{MONGODB_VERSION}}.tgz"
           - "https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64"
         configurations:
           - template: "{{CONFIG_TEMPLATE_PATH}}/init.sh.mustache"
             dest: "init.sh"
         env:
-          APP_NAME: {{INIT_APP_NAME}}
+          SERVICE_NAME: {{SERVICE_NAME}}
+          INITIATE_DELAY: {{INIT_INITIATE_DELAY}}
           ADD_DELAY: {{INIT_ADD_DELAY}}
+          MONGODB_VERSION: {{MONGODB_VERSION}}
+          MONGODB_PORT: {{MONGODB_PORT}}
 
 plans:
   deploy:

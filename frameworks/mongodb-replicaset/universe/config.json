@@ -41,6 +41,16 @@
             "type":"string",
             "default":"rs"
           },
+          "port":{
+            "description":"MongoDB server listening port",
+            "type":"number",
+            "default":27017
+          },
+          "version":{
+            "description":"MongoDB server version",
+            "type":"string",
+            "default":"3.4.1"
+          },
           "constraint":{
             "description":"Marathon-style constraint for MongoDB server nodes (use empty string to override the default hostname UNIQUE behavior)",
             "type":"string",
@@ -66,7 +76,17 @@
           "mem":{
             "description":"MongoDB init node mem requirements",
             "type":"integer",
-            "default":64
+            "default":256
+          },
+          "initiate-delay":{
+            "description":"The delay in seconds after the ReplicaSet initialization",
+            "type":"integer",
+            "default":10
+          },
+          "add-delay":{
+            "description":"The delay in seconds after each ReplicaSet host addition",
+            "type":"integer",
+            "default":5
           }
         },
         "required":[
