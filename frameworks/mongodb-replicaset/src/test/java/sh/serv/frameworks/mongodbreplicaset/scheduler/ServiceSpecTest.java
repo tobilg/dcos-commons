@@ -30,9 +30,10 @@ public class ServiceSpecTest {
 
     @BeforeClass
     public static void beforeAll() {
-        environmentVariables.set("MARATHON_APP_LABEL_DCOS_SERVICE_NAME", "inf-mongodb-replicaset");
+        environmentVariables.set("SERVICE_NAME", "inf-mongodb-replicaset");
         environmentVariables.set("EXECUTOR_URI", "");
         environmentVariables.set("PORT0", "8080");
+        environmentVariables.set("MONGODB_PORT", "27017");
         environmentVariables.set("MONGODB_COUNT", "3");
         environmentVariables.set("MONGODB_CPUS", "0.1");
         environmentVariables.set("MONGODB_MEM", "1024");
@@ -41,8 +42,8 @@ public class ServiceSpecTest {
         environmentVariables.set("INIT_CPUS", "0.2");
         environmentVariables.set("INIT_MEM", "128");
         environmentVariables.set("INIT_DISK", "0");
-        environmentVariables.set("INIT_APP_NAME", "blub");
-        environmentVariables.set("INIT_ADD_DELAY", "10");
+        environmentVariables.set("INIT_INITIATE_DELAY", "10");
+        environmentVariables.set("INIT_ADD_DELAY", "5");
         URL resource = ServiceSpecTest.class.getClassLoader().getResource("init.sh.mustache");
         environmentVariables.set("CONFIG_TEMPLATE_PATH", new File(resource.getPath()).getParent());
         environmentVariables.set("LIBMESOS_URI", "");

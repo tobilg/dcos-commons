@@ -14,6 +14,8 @@
     "DCOS_SERVICE_SCHEME": "http"
   },
   "env": {
+    "SERVICE_NAME": "{{service.name}}",
+    "MONGODB_PORT": "{{mongodb.port}}",
     "MONGODB_COUNT": "{{mongodb.count}}",
     "MONGODB_CPUS": "{{mongodb.cpus}}",
     "MONGODB_MEM": "{{mongodb.mem}}",
@@ -22,12 +24,13 @@
     {{#mongodb.constraint}}
     "MONGODB_CONSTRAINT": "{{mongodb.constraint}}",
     {{/mongodb.constraint}}
+    "MONGODB_VERSION": "{{mongodb.version}}",
     "INIT_COUNT": "1",
     "INIT_CPUS": "{{init.cpus}}",
     "INIT_MEM": "{{init.mem}}",
     "INIT_DISK": "0",
-    "INIT_APP_NAME": "{{service.name}}",
-    "INIT_ADD_DELAY": "10",
+    "INIT_ADD_DELAY": "{{init.add-delay}}",
+    "INIT_INITIATE_DELAY": "{{init.initiate-delay}}",
     "CONFIG_TEMPLATE_PATH": "scheduler",
     "LD_LIBRARY_PATH": "/opt/mesosphere/lib",
     "EXECUTOR_URI": "{{resource.assets.uris.executor-zip}}",
