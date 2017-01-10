@@ -1,22 +1,26 @@
 package com.mesosphere.sdk.scheduler;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.TextFormat;
+import com.mesosphere.sdk.scheduler.plan.strategy.CanaryStrategy;
 import com.mesosphere.sdk.state.StateStoreUtils;
+import com.mesosphere.sdk.offer.evaluate.OfferEvaluator;
 import org.apache.mesos.Protos;
 import org.apache.mesos.Scheduler;
 import org.apache.mesos.SchedulerDriver;
 
 import com.mesosphere.sdk.api.*;
+import com.mesosphere.sdk.api.types.EndpointProducer;
 import com.mesosphere.sdk.api.types.StringPropertyDeserializer;
 import com.mesosphere.sdk.config.*;
-import com.mesosphere.sdk.config.validate.ConfigurationValidator;
+import com.mesosphere.sdk.config.validate.ConfigValidator;
 import com.mesosphere.sdk.config.validate.PodSpecsCannotShrink;
 import com.mesosphere.sdk.config.validate.TaskVolumesCannotChange;
 import com.mesosphere.sdk.curator.CuratorConfigStore;
 import com.mesosphere.sdk.curator.CuratorStateStore;
+import com.mesosphere.sdk.dcos.Capabilities;
 import com.mesosphere.sdk.dcos.DcosCertInstaller;
+import com.mesosphere.sdk.dcos.DcosCluster;
 import com.mesosphere.sdk.dcos.DcosConstants;
 import com.mesosphere.sdk.offer.*;
 import com.mesosphere.sdk.reconciliation.DefaultReconciler;
@@ -28,9 +32,13 @@ import com.mesosphere.sdk.scheduler.recovery.TaskFailureListener;
 import com.mesosphere.sdk.scheduler.recovery.constrain.TimedLaunchConstrainer;
 import com.mesosphere.sdk.scheduler.recovery.monitor.NeverFailureMonitor;
 import com.mesosphere.sdk.scheduler.recovery.monitor.TimedFailureMonitor;
+import com.mesosphere.sdk.specification.DefaultPlanGenerator;
 import com.mesosphere.sdk.specification.DefaultServiceSpec;
 import com.mesosphere.sdk.specification.ReplacementFailurePolicy;
 import com.mesosphere.sdk.specification.ServiceSpec;
+import com.mesosphere.sdk.specification.validation.CapabilityValidator;
+import com.mesosphere.sdk.specification.yaml.RawPlan;
+import com.mesosphere.sdk.specification.yaml.RawServiceSpecification;
 import com.mesosphere.sdk.state.PersistentOperationRecorder;
 import com.mesosphere.sdk.state.StateStore;
 import com.mesosphere.sdk.state.StateStoreCache;
@@ -41,6 +49,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * This scheduler when provided with a ServiceSpec will deploy the service and recover from encountered faults
@@ -89,12 +98,20 @@ public class DefaultScheduler implements Scheduler, Observer {
     protected final Collection<Plan> plans;
     protected final StateStore stateStore;
     protected final ConfigStore<ServiceSpec> configStore;
-    protected final Collection<ConfigurationValidator<ServiceSpec>> configValidators;
+    /**
+     * Minimum duration to wait in milliseconds before deciding that a task has failed,
+     * or zero to disable this detection.
+     */
     protected final Optional<Integer> permanentFailureTimeoutMs;
-    protected final Integer destructiveRecoveryDelayMs;
+    /**
+     * Minimum duration to wait in milliseconds between destructive recovery operations,
+     * such as destroying a failed task.
+     */
+    protected final int destructiveRecoveryDelayMs;
 
     protected SchedulerDriver driver;
     protected OfferRequirementProvider offerRequirementProvider;
+    protected Map<String, EndpointProducer> customEndpointProducers;
     protected Reconciler reconciler;
     protected TaskFailureListener taskFailureListener;
     protected TaskKiller taskKiller;
@@ -106,105 +123,206 @@ public class DefaultScheduler implements Scheduler, Observer {
     protected Collection<Object> resources;
 
     /**
-     * Returns a new {@link DefaultScheduler} instance using the provided
-     * {@link ServiceSpec}, {@link ConfigStore}, and {@link StateStore}.
+     * Builder class for {@link DefaultScheduler}s. Uses provided custom values or reasonable defaults.
      *
-     * @param serviceSpec specification containing service name and tasks to be deployed
-     * @param stateStore  framework state storage, which must not be written to before the scheduler
-     *                    has been registered with mesos as indicated by a call to
-     *                    {@link DefaultScheduler#registered(SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)} (
-     *SchedulerDriver, com.mesosphere.sdk.Protos.FrameworkID, com.mesosphere.sdk.Protos.MasterInfo)
-     * @param configStore framework config storage, which must not be written to before the scheduler
-     *                    has been registered with mesos as indicated by a call to {@link DefaultScheduler#registered(
-     *SchedulerDriver, org.apache.mesos.Protos.FrameworkID, org.apache.mesos.Protos.MasterInfo)
-     * @see #createStateStore(String, String)
+     * Instances may be created via {@link DefaultScheduler#newBuilder(ServiceSpec)}.
      */
-    public static DefaultScheduler create(
-            ServiceSpec serviceSpec,
-            StateStore stateStore,
-            ConfigStore<ServiceSpec> configStore,
-            OfferRequirementProvider offerRequirementProvider) {
-        return create(
-                serviceSpec,
-                Collections.emptyList(),
-                stateStore,
-                configStore,
-                offerRequirementProvider,
-                defaultConfigValidators());
-    }
+    public static class Builder {
+        private final ServiceSpec serviceSpec;
 
-    /**
-     * Returns a new {@link DefaultScheduler} instance using the provided
-     * {@link ServiceSpec}, {@link ConfigStore}, and {@link StateStore}.
-     *
-     * @param serviceSpec specification containing service name and tasks to be deployed
-     *
-     * @param stateStore  framework state storage, which must not be written to before the scheduler
-     *                    has been registered with mesos as indicated by a call to
-     *                    {@link DefaultScheduler#registered(SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)} (
-     *SchedulerDriver, com.mesosphere.sdk.Protos.FrameworkID, com.mesosphere.sdk.Protos.MasterInfo)
-     * @param configStore framework config storage, which must not be written to before the scheduler
-     *                    has been registered with mesos as indicated by a call to {@link DefaultScheduler#registered(
-     *SchedulerDriver, org.apache.mesos.Protos.FrameworkID, org.apache.mesos.Protos.MasterInfo)
-     * @see #createStateStore(String, String)
-     */
-    public static DefaultScheduler create(
-            ServiceSpec serviceSpec,
-            Collection<Plan> plans,
-            StateStore stateStore,
-            ConfigStore<ServiceSpec> configStore,
-            OfferRequirementProvider offerRequirementProvider) {
-        return create(
-                serviceSpec,
-                plans,
-                stateStore,
-                configStore,
-                offerRequirementProvider,
-                defaultConfigValidators());
-    }
+        // When these optionals are unset, we use default values:
+        private Optional<StateStore> stateStoreOptional = Optional.empty();
+        private Optional<ConfigStore<ServiceSpec>> configStoreOptional = Optional.empty();
+        private Optional<Collection<ConfigValidator<ServiceSpec>>> configValidatorsOptional = Optional.empty();
 
-    /**
-     * Returns a new {@link DefaultScheduler} instance using the provided
-     * {@code frameworkName}, {@link PlanManager} stack, and {@link StateStore}.
-     *
-     * @param serviceSpec      specification containing service name and tasks to be deployed
-     * @param stateStore       framework state storage, which must not be written to before the scheduler
-     *                         has been registered with mesos as indicated by a call to
-     *                         {@link DefaultScheduler#registered
-     *                         (SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)}
-     *                         (SchedulerDriver, com.mesosphere.sdk.Protos.FrameworkID,
-     *                         com.mesosphere.sdk.Protos.MasterInfo)
-     * @param configStore      framework config storage, which must not be written to before the scheduler
-     *                         has been registered with mesos as indicated by a call to
-     *                         {@link DefaultScheduler#registered
-     *                         (SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)}
-     *                         (SchedulerDriver, com.mesosphere.sdk.Protos.FrameworkID,
-     *                         com.mesosphere.sdk.Protos.MasterInfo)
-     * @param configValidators configuration validators to be used when evaluating config changes
-     */
-    public static DefaultScheduler create(
-            ServiceSpec serviceSpec,
-            Collection<Plan> plans,
-            StateStore stateStore,
-            ConfigStore<ServiceSpec> configStore,
-            OfferRequirementProvider offerRequirementProvider,
-            Collection<ConfigurationValidator<ServiceSpec>> configValidators) {
-        ReplacementFailurePolicy replacementFailurePolicy = serviceSpec.getReplacementFailurePolicy();
-        Integer permanentFailureTimeoutMs = PERMANENT_FAILURE_DELAY_MS;
-        int destructiveRecoveryDelayMs = DELAY_BETWEEN_DESTRUCTIVE_RECOVERIES_MS;
-        if (replacementFailurePolicy != null) {
-            permanentFailureTimeoutMs = replacementFailurePolicy.getPermanentFailureTimoutMs();
-            destructiveRecoveryDelayMs = replacementFailurePolicy.getMinReplaceDelayMs();
+        // When these collections are empty, we don't do anything extra:
+        private final List<Plan> manualPlans = new ArrayList<>();
+        private final Map<String, RawPlan> yamlPlans = new HashMap<>();
+        private final Map<String, EndpointProducer> endpointProducers = new HashMap<>();
+
+        private Builder(ServiceSpec serviceSpec) {
+            this.serviceSpec = serviceSpec;
+
+            try {
+                new CapabilityValidator(new Capabilities(new DcosCluster())).validate(serviceSpec);
+            } catch (CapabilityValidator.CapabilityValidationException e) {
+                throw new IllegalStateException("Failed to validate provided ServiceSpec", e);
+            }
         }
-        return new DefaultScheduler(
-                serviceSpec,
-                plans,
-                stateStore,
-                configStore,
-                offerRequirementProvider,
-                configValidators,
-                Optional.of(permanentFailureTimeoutMs),
-                destructiveRecoveryDelayMs);
+
+        /**
+         * Returns the {@link ServiceSpec} which was provided via the constructor.
+         */
+        public ServiceSpec getServiceSpec() {
+            return serviceSpec;
+        }
+
+        /**
+         * Specifies a custom {@link StateStore}, otherwise the return value of
+         * {@link DefaultScheduler#createStateStore(ServiceSpec)} will be used.
+         *
+         * The state store persists copies of task information and task status for all tasks running in the service.
+         *
+         * @throws IllegalStateException if the state store is already set, via a previous call to either
+         *     {@link #setStateStore(StateStore)} or to {@link #getStateStore()}
+         */
+        public Builder setStateStore(StateStore stateStore) {
+            if (this.stateStoreOptional.isPresent()) {
+                // Any customization of the state store must be applied BEFORE getStateStore() is ever called.
+                throw new IllegalStateException("State store is already set. Was getStateStore() invoked before this?");
+            }
+            this.stateStoreOptional = Optional.of(stateStore);
+            return this;
+        }
+
+        /**
+         * Returns the {@link StateStore} provided via {@link #setStateStore(StateStore)}, or a reasonable default
+         * created via {@link DefaultScheduler#createStateStore(ServiceSpec)}.
+         *
+         * In order to avoid cohesiveness issues between this setting and the {@link #build()} step,
+         * {@link #setStateStore(StateStore)} may not be invoked after this has been called.
+         */
+        public StateStore getStateStore() {
+            if (!stateStoreOptional.isPresent()) {
+                setStateStore(createStateStore(serviceSpec));
+            }
+            return stateStoreOptional.get();
+        }
+
+        /**
+         * Specifies a custom {@link ConfigStore}, otherwise the return value of
+         * {@link DefaultScheduler#createConfigStore(ServiceSpec)} will be used.
+         *
+         * The config store persists a copy of the current configuration ('target' configuration),
+         * while also storing historical configurations.
+         */
+        public Builder setConfigStore(ConfigStore<ServiceSpec> configStore) {
+            this.configStoreOptional = Optional.of(configStore);
+            return this;
+        }
+
+        /**
+         * Specifies a custom list of configuration validators to be run when updating to a new target configuration,
+         * or otherwise uses the default validators returned by {@link DefaultScheduler#defaultConfigValidators()}.
+         *
+         * These validators are only used if {@link #withOfferRequirementProvider(OfferRequirementProvider)} was NOT
+         * invoked.
+         */
+        public Builder setConfigValidators(Collection<ConfigValidator<ServiceSpec>> configValidators) {
+            this.configValidatorsOptional = Optional.of(configValidators);
+            return this;
+        }
+
+        /**
+         * Specifies a custom {@link EndpointProducer} to be added to the /endpoints API. This may be used by services
+         * which wish to expose custom endpoint information via that API.
+         *
+         * @param name the name of the endpoint to be exposed
+         * @param endpointProducer the producer to be invoked when the provided endpoint name is requested
+         */
+        public Builder setEndpointProducer(String name, EndpointProducer endpointProducer) {
+            endpointProducers.put(name, endpointProducer);
+            return this;
+        }
+
+        /**
+         * Sets the {@link Plan}s from the provided {@link RawServiceSpecification} to this instance, using a
+         * {@link DefaultPlanGenerator} to handle conversion. This is overridden by any plans manually provided by
+         * {@link #setPlans(Collection)}.
+         *
+         * @throws ConfigStoreException if creating a default config store fails
+         * @throws IllegalStateException if the plans were already set either via this call or via
+         *     {@link #setPlans(Collection)}
+         */
+        public Builder setPlansFrom(RawServiceSpecification rawServiceSpec) throws ConfigStoreException {
+            if (rawServiceSpec.getPlans() != null) {
+                this.yamlPlans.clear();
+                this.yamlPlans.putAll(rawServiceSpec.getPlans());
+            }
+            return this;
+        }
+
+        /**
+         * Sets the provided {@link Plan}s to this instance. This may be used when no {@link RawServiceSpecification} is
+         * available, and overrides any calls to {@link #setPlansFrom(RawServiceSpecification)}.
+         *
+         * @throws IllegalStateException if the plans were already set either via this call or via
+         *     {@link #setPlans(RawServiceSpecification)}
+         */
+        public Builder setPlans(Collection<Plan> plans) {
+            this.manualPlans.clear();
+            this.manualPlans.addAll(plans);
+            return this;
+        }
+
+        /**
+         * Creates a new scheduler instance with the provided values or their defaults.
+         *
+         * @return a new scheduler instance
+         * @throws IllegalStateException if config validation failed when updating the target config for a default
+         *     {@link OfferRequirementProvider}, or if creating a default {@link ConfigStore} failed
+         */
+        public DefaultScheduler build() {
+            // Get custom or default state store (defaults handled by getStateStore())::
+            final StateStore stateStore = getStateStore();
+
+            // Get custom or default config store:
+            final ConfigStore<ServiceSpec> configStore;
+            if (configStoreOptional.isPresent()) {
+                configStore = configStoreOptional.get();
+            } else {
+                try {
+                    configStore = createConfigStore(serviceSpec);
+                } catch (ConfigStoreException e) {
+                    throw new IllegalStateException("Failed to create default config store", e);
+                }
+            }
+
+            // Update/validate config as needed to reflect the new service spec:
+            final ConfigurationUpdater.UpdateResult configUpdateResult = updateConfig(
+                    serviceSpec,
+                    stateStore,
+                    configStore,
+                    configValidatorsOptional.orElse(defaultConfigValidators()));
+            if (!configUpdateResult.errors.isEmpty()) {
+                throw new IllegalStateException(String.format(
+                        "Failed to update configuration due to errors with configuration %s: %s",
+                        configUpdateResult.targetId, configUpdateResult.errors));
+            }
+
+            // Get or generate plans. Any plan generation is against the service spec that we just updated:
+            final List<Plan> plans;
+            if (!manualPlans.isEmpty()) {
+                plans = new ArrayList<>(manualPlans);
+            } else if (!yamlPlans.isEmpty()) {
+                // Note: Any internal Plan generation must only be AFTER updating/validating the config. Otherwise plans
+                // may look at the old config and mistakenly think they're COMPLETE.
+                DefaultPlanGenerator planGenerator = new DefaultPlanGenerator(configStore, stateStore);
+                plans = yamlPlans.entrySet().stream()
+                        .map(e -> planGenerator.generate(e.getValue(), e.getKey(), serviceSpec.getPods()))
+                        .collect(Collectors.toList());
+            } else {
+                // A default deployment plan will automatically be generated:
+                plans = Collections.emptyList();
+            }
+
+            return new DefaultScheduler(
+                    serviceSpec,
+                    plans,
+                    stateStore,
+                    configStore,
+                    createOfferRequirementProvider(stateStore, configUpdateResult.targetId),
+                    endpointProducers);
+        }
+    }
+
+    /**
+     * Creates a new {@link Builder} based on the provided {@link ServiceSpec} describing the service, including
+     * details such as the service name, the pods/tasks to be deployed, and the plans describing how the deployment
+     * should be organized.
+     */
+    public static Builder newBuilder(ServiceSpec serviceSpec) {
+        return new Builder(serviceSpec);
     }
 
     /**
@@ -218,34 +336,7 @@ public class DefaultScheduler implements Scheduler, Observer {
      * @param zkConnectionString the zookeeper connection string to be passed to curator (host:port)
      */
     public static StateStore createStateStore(ServiceSpec serviceSpec, String zkConnectionString) {
-        return StateStoreCache.getInstance(new CuratorStateStore(
-                serviceSpec.getName(),
-                zkConnectionString));
-    }
-
-    public static ConfigurationUpdater.UpdateResult updateConfig(
-            ServiceSpec serviceSpec,
-            StateStore stateStore,
-            ConfigStore<ServiceSpec> configStore) {
-        LOGGER.info("Updating config...");
-        ConfigurationUpdater<ServiceSpec> configurationUpdater =
-                new DefaultConfigurationUpdater(
-                        stateStore,
-                        configStore,
-                        DefaultServiceSpec.getComparatorInstance(),
-                        DefaultScheduler.defaultConfigValidators());
-        final ConfigurationUpdater.UpdateResult configUpdateResult;
-        try {
-            configUpdateResult = configurationUpdater.updateConfiguration(serviceSpec);
-            return configUpdateResult;
-        } catch (ConfigStoreException e) {
-            LOGGER.error("Fatal error when performing configuration update. Service exiting.", e);
-            throw new IllegalStateException(e);
-        }
-    }
-
-    public static OfferRequirementProvider createOfferRequirementProvider(StateStore stateStore, UUID targetConfigId) {
-        return new DefaultOfferRequirementProvider(stateStore, targetConfigId);
+        return StateStoreCache.getInstance(new CuratorStateStore(serviceSpec.getName(), zkConnectionString));
     }
 
     /**
@@ -254,10 +345,8 @@ public class DefaultScheduler implements Scheduler, Observer {
      *
      * @see DcosConstants#MESOS_MASTER_ZK_CONNECTION_STRING
      */
-    public static StateStore createStateStore(ServiceSpec serviceSpecification) {
-        return createStateStore(
-                serviceSpecification,
-                DcosConstants.MESOS_MASTER_ZK_CONNECTION_STRING);
+    public static StateStore createStateStore(ServiceSpec serviceSpec) {
+        return createStateStore(serviceSpec, DcosConstants.MESOS_MASTER_ZK_CONNECTION_STRING);
     }
 
     /**
@@ -268,11 +357,10 @@ public class DefaultScheduler implements Scheduler, Observer {
      * {@link DefaultScheduler#registered(SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)} (SchedulerDriver,
      * org.apache.mesos.Protos.FrameworkID, org.apache.mesos.Protos.MasterInfo)}.
      *
-     * @param zkConnectionString            the zookeeper connection string to be passed to curator (host:port)
+     * @param zkConnectionString the zookeeper connection string to be passed to curator (host:port)
      * @param customDeserializationSubtypes custom subtypes to register for deserialization of
-     *                                      {@link DefaultServiceSpec}, mainly useful for deserializing custom
-     *                                      implementations of
-     *                                      {@link com.mesosphere.sdk.offer.constrain.PlacementRule}s.
+     *     {@link DefaultServiceSpec}, mainly useful for deserializing custom implementations of
+     *     {@link com.mesosphere.sdk.offer.constrain.PlacementRule}s.
      * @throws ConfigStoreException if validating serialization of the config fails, e.g. due to an
      *                              unrecognized deserialization type
      */
@@ -290,21 +378,13 @@ public class DefaultScheduler implements Scheduler, Observer {
      * Calls {@link #createConfigStore(ServiceSpec, String, Collection))} with the specification name as
      * the {@code frameworkName} and with a reasonable default for {@code zkConnectionString}.
      *
-     * @param customDeserializationSubtypes custom subtypes to register for deserialization of
-     *                                      {@link DefaultServiceSpec}, mainly useful for deserializing custom
-     *                                      implementations of
-     *                                      {@link com.mesosphere.sdk.offer.constrain.PlacementRule}s.
+     * @param zkConnectionString the zookeeper connection string to be passed to curator (host:port)
      * @throws ConfigStoreException if validating serialization of the config fails, e.g. due to an
      *                              unrecognized deserialization type
-     * @see DcosConstants#MESOS_MASTER_ZK_CONNECTION_STRING
      */
-    public static ConfigStore<ServiceSpec> createConfigStore(
-            ServiceSpec serviceSpec,
-            Collection<Class<?>> customDeserializationSubtypes) throws ConfigStoreException {
-        return createConfigStore(
-                serviceSpec,
-                DcosConstants.MESOS_MASTER_ZK_CONNECTION_STRING,
-                customDeserializationSubtypes);
+    public static ConfigStore<ServiceSpec> createConfigStore(ServiceSpec serviceSpec, String zkConnectionString)
+            throws ConfigStoreException {
+        return createConfigStore(serviceSpec, zkConnectionString, Collections.emptyList());
     }
 
     /**
@@ -313,10 +393,10 @@ public class DefaultScheduler implements Scheduler, Observer {
      *
      * @throws ConfigStoreException if validating serialization of the config fails, e.g. due to an
      *                              unrecognized deserialization type
+     * @see DcosConstants#MESOS_MASTER_ZK_CONNECTION_STRING
      */
-    public static ConfigStore<ServiceSpec> createConfigStore(
-            ServiceSpec serviceSpec) throws ConfigStoreException {
-        return createConfigStore(serviceSpec, Collections.emptyList());
+    public static ConfigStore<ServiceSpec> createConfigStore(ServiceSpec serviceSpec) throws ConfigStoreException {
+        return createConfigStore(serviceSpec, DcosConstants.MESOS_MASTER_ZK_CONNECTION_STRING);
     }
 
     /**
@@ -327,7 +407,7 @@ public class DefaultScheduler implements Scheduler, Observer {
      * This function may be used to get the default validators and add more to the list when
      * constructing the {@link DefaultScheduler}.
      */
-    public static List<ConfigurationValidator<ServiceSpec>> defaultConfigValidators() {
+    public static List<ConfigValidator<ServiceSpec>> defaultConfigValidators() {
         // Return a list to allow direct append by the caller.
         return Arrays.asList(
                 new PodSpecsCannotShrink(),
@@ -335,25 +415,43 @@ public class DefaultScheduler implements Scheduler, Observer {
     }
 
     /**
-     * Creates a new DefaultScheduler.
+     * Updates the configuration target to reflect the provided {@code serviceSpec} using the provided
+     * {@code configValidators}, or stays with the previous configuration if there were validation errors.
      *
-     * @param serviceSpec                 specification containing service name and tasks to be deployed
-     * @param stateStore                  framework state storage, which must not be written to before the scheduler
-     *                                    has been registered with mesos as indicated by a call to
-     *                                    {@link DefaultScheduler#registered
-     *                                    (SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)} (SchedulerDriver,
-     *                                    com.mesosphere.sdk.Protos.FrameworkID, com.mesosphere.sdk.Protos.MasterInfo)
-     * @param configStore                 framework config storage, which must not be written to before the scheduler
-     *                                    has been registered with mesos as indicated by a call to
-     *                                    {@link DefaultScheduler#registered
-     *                                    (SchedulerDriver, Protos.FrameworkID, Protos.MasterInfo)} (SchedulerDriver,
-     *                                    org.apache.mesos.Protos.FrameworkID, org.apache.mesos.Protos.MasterInfo)
-     * @param configValidators            custom validators to be used, instead of the default validators
-     *                                    returned by {@link #defaultConfigValidators()}
-     * @param permanentFailureTimeoutMs   minimum duration to wait in milliseconds before deciding that a
-     *                                    task has failed, or an empty {@link Optional} to disable this detection
-     * @param destructiveRecoveryDelayMs  minimum duration to wait in milliseconds between destructive
-     *                                    recovery operations such as destroying a failed task
+     * @param serviceSpec the service specification to use
+     * @param stateStore the state store to pass to the updater
+     * @param configStore the config store to pass to the updater
+     * @param configValidators the list of config validators, see {@link #defaultConfigValidators()} for reasonable
+     *     defaults
+     * @return the config update result, which may contain one or more validation errors produced by
+     *     {@code configValidators}
+     */
+    public static ConfigurationUpdater.UpdateResult updateConfig(
+            ServiceSpec serviceSpec,
+            StateStore stateStore,
+            ConfigStore<ServiceSpec> configStore,
+            Collection<ConfigValidator<ServiceSpec>> configValidators) {
+        LOGGER.info("Updating config with {} validators...", configValidators.size());
+        ConfigurationUpdater<ServiceSpec> configurationUpdater = new DefaultConfigurationUpdater(
+                stateStore, configStore, DefaultServiceSpec.getComparatorInstance(), configValidators);
+        try {
+            return configurationUpdater.updateConfiguration(serviceSpec);
+        } catch (ConfigStoreException e) {
+            LOGGER.error("Fatal error when performing configuration update. Service exiting.", e);
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Creates a new instance which relies on the provided {@link StateStore} for storing known tasks, and which expects
+     * tasks tagged with the provided {@code targetConfigurationId}.
+     */
+    public static OfferRequirementProvider createOfferRequirementProvider(StateStore stateStore, UUID targetConfigId) {
+        return new DefaultOfferRequirementProvider(stateStore, targetConfigId);
+    }
+
+    /**
+     * Creates a new DefaultScheduler. See information about parameters in {@link Builder}.
      */
     protected DefaultScheduler(
             ServiceSpec serviceSpec,
@@ -361,17 +459,26 @@ public class DefaultScheduler implements Scheduler, Observer {
             StateStore stateStore,
             ConfigStore<ServiceSpec> configStore,
             OfferRequirementProvider offerRequirementProvider,
-            Collection<ConfigurationValidator<ServiceSpec>> configValidators,
-            Optional<Integer> permanentFailureTimeoutMs,
-            Integer destructiveRecoveryDelayMs) {
+            Map<String, EndpointProducer> customEndpointProducers) {
         this.serviceSpec = serviceSpec;
         this.plans = plans;
         this.stateStore = stateStore;
         this.configStore = configStore;
         this.offerRequirementProvider = offerRequirementProvider;
-        this.configValidators = configValidators;
-        this.permanentFailureTimeoutMs = permanentFailureTimeoutMs;
-        this.destructiveRecoveryDelayMs = destructiveRecoveryDelayMs;
+        this.customEndpointProducers = customEndpointProducers;
+        ReplacementFailurePolicy replacementFailurePolicy = serviceSpec.getReplacementFailurePolicy();
+        if (replacementFailurePolicy != null) {
+            // interpret unset/null as disabled:
+            this.permanentFailureTimeoutMs =
+                    Optional.ofNullable(replacementFailurePolicy.getPermanentFailureTimoutMs());
+            // interpret unset/null as zero delay:
+            this.destructiveRecoveryDelayMs = replacementFailurePolicy.getMinReplaceDelayMs() == null
+                    ? 0 : replacementFailurePolicy.getMinReplaceDelayMs();
+        } else {
+            // default values if policy section is unset:
+            this.permanentFailureTimeoutMs = Optional.of(PERMANENT_FAILURE_DELAY_MS);
+            this.destructiveRecoveryDelayMs = DELAY_BETWEEN_DESTRUCTIVE_RECOVERIES_MS;
+        }
     }
 
     public Collection<Object> getResources() throws InterruptedException {
@@ -402,14 +509,18 @@ public class DefaultScheduler implements Scheduler, Observer {
         initializeGlobals(driver);
         initializeDeploymentPlanManager();
         initializeRecoveryPlanManager();
+        initializePlanCoordinator();
         initializeResources();
         DcosCertInstaller.installCertificate(System.getenv("JAVA_HOME"));
-        final List<PlanManager> planManagers = Arrays.asList(
-                deploymentPlanManager,
-                recoveryPlanManager);
-        planCoordinator = new DefaultPlanCoordinator(planManagers, planScheduler);
         planCoordinator.subscribe(this);
         LOGGER.info("Done initializing.");
+    }
+
+    private Collection<PlanManager> getOtherPlanManagers() {
+        return plans.stream()
+                .filter(plan -> !PlanUtils.isDeployPlan(plan))
+                .map(plan -> new DefaultPlanManager(plan))
+                .collect(Collectors.toList());
     }
 
     private void initializeGlobals(SchedulerDriver driver) {
@@ -428,7 +539,9 @@ public class DefaultScheduler implements Scheduler, Observer {
      */
     protected void initializeDeploymentPlanManager() {
         LOGGER.info("Initializing deployment plan...");
-        Optional<Plan> deploy = plans.stream().filter(plan -> Objects.equals(plan.getName(), "deploy")).findFirst();
+        Optional<Plan> deploy = plans.stream()
+                .filter(plan -> PlanUtils.isDeployPlan(plan))
+                .findFirst();
         Plan deployPlan;
         if (!deploy.isPresent()) {
             LOGGER.info("No deploy plan provided. Generating one");
@@ -439,6 +552,16 @@ public class DefaultScheduler implements Scheduler, Observer {
             deployPlan = deploy.get();
         }
         deploymentPlanManager = new DefaultPlanManager(deployPlan);
+
+        // All plans are initially created with an interrupted strategy.
+        // Normally we don't want the deployment plan to be interrupted,
+        // except in the case of the CanaryStrategy which explicitly
+        // indicates the end-user wants the deployment plan to start out
+        // interrupted.
+        Plan plan = deploymentPlanManager.getPlan();
+        if (!(plan.getStrategy() instanceof CanaryStrategy)) {
+            plan.getStrategy().proceed();
+        }
     }
 
     /**
@@ -455,14 +578,24 @@ public class DefaultScheduler implements Scheduler, Observer {
                         : new NeverFailureMonitor());
     }
 
+    protected void initializePlanCoordinator() {
+        final List<PlanManager> planManagers = new ArrayList<>();
+        planManagers.add(deploymentPlanManager);
+        planManagers.add(recoveryPlanManager);
+        planManagers.addAll(getOtherPlanManagers());
+        planCoordinator = new DefaultPlanCoordinator(planManagers, planScheduler);
+    }
+
     private void initializeResources() throws InterruptedException {
         LOGGER.info("Initializing resources...");
         Collection<Object> resources = new ArrayList<>();
         resources.add(new ConfigResource<ServiceSpec>(configStore));
-        resources.add(new EndpointsResource(stateStore, serviceSpec.getName()));
-        resources.add(new PlansResource(ImmutableMap.of(
-                "deploy", deploymentPlanManager,
-                "recovery", recoveryPlanManager)));
+        EndpointsResource endpointsResource = new EndpointsResource(stateStore, serviceSpec.getName());
+        for (Map.Entry<String, EndpointProducer> entry : customEndpointProducers.entrySet()) {
+            endpointsResource.setCustomEndpoint(entry.getKey(), entry.getValue());
+        }
+        resources.add(endpointsResource);
+        resources.add(new PlansResource(planCoordinator));
         resources.add(new PodsResource(taskKiller, stateStore));
         resources.add(new StateResource(stateStore, new StringPropertyDeserializer()));
         resources.add(new TaskResource(stateStore, taskKiller, serviceSpec.getName()));
@@ -490,11 +623,6 @@ public class DefaultScheduler implements Scheduler, Observer {
         }
     }
 
-    @SuppressWarnings({"DM_EXIT"})
-    private static void hardExit(SchedulerErrorCode errorCode) {
-        System.exit(errorCode.ordinal());
-    }
-
     @Override
     public void registered(SchedulerDriver driver, Protos.FrameworkID frameworkId, Protos.MasterInfo masterInfo) {
         LOGGER.info("Registered framework with frameworkId: {}", frameworkId.getValue());
@@ -502,7 +630,7 @@ public class DefaultScheduler implements Scheduler, Observer {
             initialize(driver);
         } catch (InterruptedException e) {
             LOGGER.error("Initialization failed with exception: ", e);
-            hardExit(SchedulerErrorCode.INITIALIZATION_FAILURE);
+            SchedulerUtils.hardExit(SchedulerErrorCode.INITIALIZATION_FAILURE);
         }
 
         try {
@@ -510,7 +638,7 @@ public class DefaultScheduler implements Scheduler, Observer {
         } catch (Exception e) {
             LOGGER.error(String.format(
                     "Unable to store registered framework ID '%s'", frameworkId.getValue()), e);
-            hardExit(SchedulerErrorCode.REGISTRATION_FAILURE);
+            SchedulerUtils.hardExit(SchedulerErrorCode.REGISTRATION_FAILURE);
         }
 
         this.driver = driver;
@@ -522,7 +650,10 @@ public class DefaultScheduler implements Scheduler, Observer {
     @Override
     public void reregistered(SchedulerDriver driver, Protos.MasterInfo masterInfo) {
         LOGGER.error("Re-registration implies we were unregistered.");
-        hardExit(SchedulerErrorCode.RE_REGISTRATION);
+        SchedulerUtils.hardExit(SchedulerErrorCode.RE_REGISTRATION);
+        reconciler.start();
+        reconciler.reconcile(driver);
+        suppressOrRevive();
     }
 
     @Override
@@ -578,7 +709,7 @@ public class DefaultScheduler implements Scheduler, Observer {
     @Override
     public void offerRescinded(SchedulerDriver driver, Protos.OfferID offerId) {
         LOGGER.error("Rescinding offers is not supported.");
-        hardExit(SchedulerErrorCode.OFFER_RESCINDED);
+        SchedulerUtils.hardExit(SchedulerErrorCode.OFFER_RESCINDED);
     }
 
     @Override
@@ -594,8 +725,9 @@ public class DefaultScheduler implements Scheduler, Observer {
                 // Store status, then pass status to PlanManager => Plan => Steps
                 try {
                     stateStore.storeStatus(status);
-                    deploymentPlanManager.update(status);
-                    recoveryPlanManager.update(status);
+                    planCoordinator.getPlanManagers().stream()
+                            .filter(planManager -> !planManager.getPlan().isWaiting())
+                            .forEach(planManager -> planManager.update(status));
                     reconciler.update(status);
 
                     if (stateStore.isSuppressed()
@@ -622,7 +754,7 @@ public class DefaultScheduler implements Scheduler, Observer {
     @Override
     public void disconnected(SchedulerDriver driver) {
         LOGGER.error("Disconnected from Master.");
-        hardExit(SchedulerErrorCode.DISCONNECTED);
+        SchedulerUtils.hardExit(SchedulerErrorCode.DISCONNECTED);
     }
 
     @Override
@@ -657,7 +789,7 @@ public class DefaultScheduler implements Scheduler, Observer {
                     + "install this service once more.");
         }
 
-        hardExit(SchedulerErrorCode.ERROR);
+        SchedulerUtils.hardExit(SchedulerErrorCode.ERROR);
     }
 
     private void suppressOrRevive() {

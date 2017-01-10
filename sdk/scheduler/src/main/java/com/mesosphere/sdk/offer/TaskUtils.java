@@ -1,20 +1,21 @@
 package com.mesosphere.sdk.offer;
 
-import com.mesosphere.sdk.scheduler.plan.Step;
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.mesos.Protos.*;
 import com.mesosphere.sdk.config.ConfigStore;
 import com.mesosphere.sdk.config.ConfigStoreException;
 import com.mesosphere.sdk.scheduler.plan.DefaultPodInstance;
+import com.mesosphere.sdk.scheduler.plan.Step;
 import com.mesosphere.sdk.specification.*;
 import com.mesosphere.sdk.state.StateStore;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.mesos.Protos.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static com.mesosphere.sdk.offer.Constants.GOAL_STATE_KEY;
+import static com.mesosphere.sdk.offer.CommonTaskUtils.*;
+import static com.mesosphere.sdk.offer.Constants.*;
 
 /**
  * Various utility methods for manipulating data in {@link TaskInfo}s.
@@ -31,7 +32,7 @@ public class TaskUtils {
      * which matches the provided {@link TaskInfo}, or {@code null} if no match could be found.
      */
     public static PodSpec getPodSpec(ServiceSpec serviceSpec, TaskInfo taskInfo) throws TaskException {
-        String podType = CommonTaskUtils.getType(taskInfo);
+        String podType = getType(taskInfo);
 
         for (PodSpec podSpec : serviceSpec.getPods()) {
             if (podSpec.getType().equals(podType)) {
@@ -44,6 +45,7 @@ public class TaskUtils {
 
     /**
      * Returns all the Task names for a PodInstance.
+     *
      * @param podInstance A PodInstance
      * @return A List of all the task names.
      */
@@ -55,7 +57,8 @@ public class TaskUtils {
 
     /**
      * Returns all the task names for a pod, after filtering based on the passed in list of tasks to launch.
-     * @param podInstance A PodInstance
+     *
+     * @param podInstance   A PodInstance
      * @param tasksToLaunch The names of TaskSpecs which should be launched.
      * @return A list of the appropriate task names.
      */
@@ -70,28 +73,35 @@ public class TaskUtils {
     /**
      * Returns the TaskInfos associated with a PodInstance if its ever been launched.  The list will be empty if the
      * PodInstance has never been launched.
+     *
      * @param podInstance A PodInstance
-     * @param stateStore A StateStore to search for the appropriate TaskInfos.
+     * @param stateStore  A StateStore to search for the appropriate TaskInfos.
      * @return The list of TaskInfos associated with a PodInstance.
      */
     public static List<TaskInfo> getPodTasks(PodInstance podInstance, StateStore stateStore) {
         return stateStore.fetchTasks().stream()
                 .filter(taskInfo -> {
                     try {
-                        return CommonTaskUtils.getType(taskInfo).equals(podInstance.getName());
+                        return isSamePodInstance(taskInfo, podInstance);
                     } catch (TaskException e) {
-                        LOGGER.error("Encountered ");
+                        LOGGER.error("Failed to find pod tasks with exception: ", e);
                         return false;
                     }
                 })
                 .collect(Collectors.toList());
     }
 
+    private static boolean isSamePodInstance(TaskInfo taskInfo, PodInstance podInstance) throws TaskException {
+        return getType(taskInfo).equals(podInstance.getPod().getType())
+                && getIndex(taskInfo) == podInstance.getIndex();
+    }
+
     /**
      * Returns the TaskInfos for a PodInstance which should be running.  The list will be empty if the PodInstance has
      * never been launched.
+     *
      * @param podInstance A PodInstance
-     * @param stateStore A StateStore to search for the appropriate TaskInfos.
+     * @param stateStore  A StateStore to search for the appropriate TaskInfos.
      * @return The list of TaskInfos associate with a PodInstance which should be running.
      */
     public static List<TaskInfo> getTaskInfosShouldBeRunning(PodInstance podInstance, StateStore stateStore) {
@@ -122,8 +132,9 @@ public class TaskUtils {
 
     /**
      * Returns the ExecutorInfo of a PodInstance if it is still running so it may be re-used.
+     *
      * @param podInstance A PodInstance
-     * @param stateStore A StateStore to search for the appropriate TaskInfos.
+     * @param stateStore  A StateStore to search for the appropriate TaskInfos.
      * @return The ExecutorInfo if the Executor is running, Optional.empty() otherwise.
      */
     public static Optional<ExecutorInfo> getExecutor(PodInstance podInstance, StateStore stateStore) {
@@ -145,6 +156,7 @@ public class TaskUtils {
 
     /**
      * Determines whether two TaskSpecs are different.
+     *
      * @param oldTaskSpec The previous definition of a Task.
      * @param newTaskSpec The new definition of a Task.
      * @return true if the Tasks are different, false otherwise.
@@ -247,9 +259,9 @@ public class TaskUtils {
         Map<String, ResourceSpecification> resourceMap = new HashMap<>();
         for (ResourceSpecification resourceSpecification : resourceSpecifications) {
             ResourceSpecification prevValue = resourceMap.put(resourceSpecification.getName(), resourceSpecification);
-            if (prevValue != null) {
+            if (prevValue != null && !prevValue.getName().equals(PORTS_RESOURCE_TYPE)) {
                 throw new IllegalArgumentException(String.format(
-                        "Resources for a given task may not share the same name. " +
+                        "Non-port resources for a given task may not share the same name. " +
                                 "name:'%s' oldResource:'%s' newResource:'%s'",
                         resourceSpecification.getName(), prevValue, resourceSpecification));
             }
@@ -291,21 +303,23 @@ public class TaskUtils {
 
     /**
      * Sets a label on a TaskInfo indicating the Task's {@link GoalState}.
+     *
      * @param taskInfoBuilder The TaskInfo to be labeled.
-     * @param taskSpec The TaskSpec containing the goal state.
+     * @param taskSpec        The TaskSpec containing the goal state.
      * @return The labeled TaskInfo
      */
     public static TaskInfo.Builder setGoalState(TaskInfo.Builder taskInfoBuilder, TaskSpec taskSpec) {
         return taskInfoBuilder
-                .setLabels(CommonTaskUtils.withLabelSet(taskInfoBuilder.getLabels(),
+                .setLabels(withLabelSet(taskInfoBuilder.getLabels(),
                         GOAL_STATE_KEY,
                         taskSpec.getGoal().name()));
     }
 
     /**
      * Gets the {@link GoalState} of Task.
+     *
      * @param podInstance A PodInstance containing tasks.
-     * @param taskName The name of the Task whose goal state is desired
+     * @param taskName    The name of the Task whose goal state is desired
      * @return The {@link GoalState} of the task.
      * @throws TaskException is thrown when unable to determine a task's {@link GoalState}
      */
@@ -353,7 +367,7 @@ public class TaskUtils {
             TaskInfo taskInfo) throws TaskException {
 
         PodSpec podSpec = getPodSpec(configStore, taskInfo);
-        Integer index = CommonTaskUtils.getIndex(taskInfo);
+        Integer index = getIndex(taskInfo);
 
         return new DefaultPodInstance(podSpec, index);
     }
@@ -362,7 +376,7 @@ public class TaskUtils {
             ConfigStore<ServiceSpec> configStore,
             TaskInfo taskInfo) throws TaskException {
 
-        UUID configId = CommonTaskUtils.getTargetConfiguration(taskInfo);
+        UUID configId = getTargetConfiguration(taskInfo);
         ServiceSpec serviceSpec;
 
         try {
@@ -384,7 +398,8 @@ public class TaskUtils {
     /**
      * Determines whether a Task needs to eb reovered based on its current definition (TaskSpec) and status
      * (TaskStatus).
-     * @param taskSpec The definition of a task
+     *
+     * @param taskSpec   The definition of a task
      * @param taskStatus The status of the task.
      * @return true if recovery is needed, false otherwise.
      */
@@ -392,13 +407,14 @@ public class TaskUtils {
         if (taskSpec.getGoal() == GoalState.FINISHED && taskStatus.getState() == TaskState.TASK_FINISHED) {
             return false;
         } else {
-            return CommonTaskUtils.needsRecovery(taskStatus);
+            return isRecoveryNeeded(taskStatus);
         }
     }
 
     /**
      * Returns a default name for a {@link Step} given a PodInstance and the tasks to be launched in it.
-     * @param podInstance The PodInstance to be launched by a {@link Step}.
+     *
+     * @param podInstance   The PodInstance to be launched by a {@link Step}.
      * @param tasksToLaunch The tasks to be launched in the Pod.
      * @return The {@link Step} name
      */

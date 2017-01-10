@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import org.apache.mesos.Protos;
 import com.mesosphere.sdk.specification.yaml.RawServiceSpecification;
 import com.mesosphere.sdk.specification.yaml.YAMLServiceSpecFactory;
+import com.mesosphere.sdk.specification.util.RLimit;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -68,12 +69,14 @@ public class DefaultServiceSpecTest {
                 .filter(r -> r.getName().equals("ports"))
                 .collect(Collectors.toList());
 
-        Assert.assertEquals(1, portsResources.size());
+        Assert.assertEquals(2, portsResources.size());
 
         Protos.Value.Ranges ports = portsResources.get(0).getValue().getRanges();
-        Assert.assertEquals(2, ports.getRangeCount());
+        Assert.assertEquals(1, ports.getRangeCount());
         Assert.assertEquals(8080, ports.getRange(0).getBegin(), ports.getRange(0).getEnd());
-        Assert.assertEquals(8088, ports.getRange(1).getBegin(), ports.getRange(1).getEnd());
+
+        ports = portsResources.get(1).getValue().getRanges();
+        Assert.assertEquals(8088, ports.getRange(0).getBegin(), ports.getRange(0).getEnd());
     }
 
     @Test
@@ -143,6 +146,15 @@ public class DefaultServiceSpecTest {
         }
     }
 
+    @Test(expected = RLimit.InvalidRLimitException.class)
+    public void invalidRLimitName() throws Exception {
+        environmentVariables.set("PORT0", "8080");
+        ClassLoader classLoader = getClass().getClassLoader();
+        File file = new File(classLoader.getResource("invalid-rlimit-name.yml").getFile());
+        YAMLServiceSpecFactory
+                .generateServiceSpec(YAMLServiceSpecFactory.generateRawSpecFromYAML(file));
+    }
+
     @Test
     public void invalidTaskNamePojo() throws Exception {
         environmentVariables.set("PORT0", "8080");
@@ -193,5 +205,29 @@ public class DefaultServiceSpecTest {
                 Assert.assertTrue(constraintViolations.size() > 0);
             }
         }
+    }
+
+    @Test
+    public void defaultZKConnection() throws Exception {
+        environmentVariables.set("PORT0", "8080");
+        ClassLoader classLoader = getClass().getClassLoader();
+        File file = new File(classLoader.getResource("valid-minimal.yml").getFile());
+        DefaultServiceSpec serviceSpec = YAMLServiceSpecFactory
+                .generateServiceSpec(YAMLServiceSpecFactory.generateRawSpecFromYAML(file));
+        Assert.assertNotNull(serviceSpec);
+        Assert.assertNotNull(serviceSpec.getZookeeperConnection());
+        Assert.assertEquals(DefaultServiceSpec.DEFAULT_ZK_CONNECTION, serviceSpec.getZookeeperConnection());
+    }
+
+    @Test
+    public void customZKConnection() throws Exception {
+        environmentVariables.set("PORT0", "8080");
+        ClassLoader classLoader = getClass().getClassLoader();
+        File file = new File(classLoader.getResource("valid-customzk.yml").getFile());
+        DefaultServiceSpec serviceSpec = YAMLServiceSpecFactory
+                .generateServiceSpec(YAMLServiceSpecFactory.generateRawSpecFromYAML(file));
+        Assert.assertNotNull(serviceSpec);
+        Assert.assertNotNull(serviceSpec.getZookeeperConnection());
+        Assert.assertEquals("custom.master.mesos:2181", serviceSpec.getZookeeperConnection());
     }
 }
