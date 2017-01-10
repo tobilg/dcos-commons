@@ -13,7 +13,7 @@ pods:
           - name: "mongodb-port"
             port: {{MONGODB_PORT}}
             vip:
-              prefix: "{{SERVICE_NAME}}"
+              prefix: "mongodb"
               port: {{MONGODB_PORT}}
         volumes:
           - path: "mongodb-replicaset"
