@@ -1,10 +1,10 @@
 # mongodb-replicaset
 
-A framework to establish a MongoDB ReplicaSet in a Mesos or DC/OS cluster. It is based on [dcos-commons](https://github.com/mesosphere/dcos-commons). 
+A framework to establish a MongoDB Replica Set in a Mesos or DC/OS cluster. It is based on [dcos-commons](https://github.com/mesosphere/dcos-commons). 
 
 At the current state, it launches a Mesos framework scheduler, which then coordinates the launch of the actual tasks containing the `mongod` processes. Once those tasks have been launched and are running, it will launch an initialization task, which initializes the Replica Set and then adds the remaining `mongod` instances to the Replica Set. Once this is done, you can use the Replica Set for your client applications.
 
-Currently, it is not possible to scale the Replica Set to more instances, due to how the YAML plans work in [dcos-commons](https://github.com/mesosphere/dcos-commons). In the future, it's very likely that this will be possible.
+Currently, it is not possible to scale the Replica Set to more instances than defined when installing the package, due to how the YAML plans work in [dcos-commons](https://github.com/mesosphere/dcos-commons). In the future, it's very likely that this will be possible.
 
 ## Installation via Universe
 
@@ -138,5 +138,5 @@ It will then use Minuteman under the hood to loadbalance the requests to individ
  
 ## Roadmap
 
- [ ] Enable authorization
- [ ] Enable scaling
+ - [ ] Enable authorization
+ - [ ] Enable scaling after the Replica Set has started
