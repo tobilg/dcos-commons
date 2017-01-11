@@ -46,7 +46,7 @@ In the second tab, you can set everything related to the actual `mongod` instanc
 In the third tab you can configure the resources and delays for the `init` container. Normally, you don't need to change anything here:
 ![Screenshot 3 - init definition](https://files.serv.sh/frameworks/mongodb-replicaset/images/screenshots/mongodb-screenshot_3.png)
 
-## Start with Marathon
+## Installation via Marathon
 
 Example app definition (as long as the package is not yet in the Universe):
 
@@ -134,9 +134,99 @@ As the framework uses VIPs, you can use a simple MongoDB connection string to co
 mongodb://mongodb.mongodb-replicaset.l4lb.thisdcos.directory:27017/?replicaSet={mongodb.replicaSetName}
 ```
 
+where `{mongodb.replicaSetName}` is the Replica Set name you used while configuring the package.
+
 It will then use Minuteman under the hood to loadbalance the requests to individual MongoDB instances.
- 
+
+## CLI integration
+
+The `mongodb-replicaset` package has a integration in the DC/OS CLI (via the `dcos-commons` cli extensions), which is installed if you install the package via CLI.
+
+### Manual installation
+
+You can also manually install the CLI extension (if you have installed the package via DC/OS UI for example) by running
+
+```bash
+$ dcos package install --cli mongodb-replicaset
+```
+
+### Command overview
+
+```bash
+$ dcos mongodb-replicaset --help
+usage: mongodb-replicaset [<flags>] <command> [<args> ...]
+
+Provides CLI integration for the mongodb-replicaset package
+
+Flags:
+  -h, --help            Show context-sensitive help (also try --help-long and
+                        --help-man).
+      --version         Show application version.
+  -v, --verbose         Enable extra logging of requests/responses
+      --info            Show short description.
+      --force-insecure  Allow unverified TLS certificates when querying service
+      --custom-auth-token=DCOS_AUTH_TOKEN
+                        Custom auth token to use when querying service
+      --custom-dcos-url=DCOS_URI/DCOS_URL
+                        Custom cluster URL to use when querying service
+      --custom-cert-path=DCOS_CA_PATH/DCOS_CERT_PATH
+                        Custom TLS CA certificate file to use when querying
+                        service
+      --name="mongodb-replicaset"
+                        Name of the service instance to query
+
+Commands:
+  help [<command>...]
+    Show help.
+
+  config list
+    List IDs of all available configurations
+
+  config show <config_id>
+    Display a specified configuration
+
+  config target
+    Display the target configuration
+
+  config target_id
+    List ID of the target configuration
+
+  connection [<type>]
+    View connection information (custom types: foo, bar)
+
+  plan active
+    Display the active operation chain, if any
+
+  plan show
+    Display the full plan
+
+  plan continue
+    Continue a currently Waiting operation
+
+  plan interrupt
+    Interrupt the current InProgress operation
+
+  plan force <phase> <step>
+    Force the current operation to complete
+
+  plan restart <phase> <step>
+    Restart the current operation
+
+  state framework_id
+    Display the mesos framework ID
+
+  state status <name>
+    Display the TaskStatus for a task name
+
+  state task <name>
+    Display the TaskInfo for a task name
+
+  state tasks
+    List names of all persisted tasks
+``` 
+
+
 ## Roadmap
 
  - [ ] Enable authorization
- - [ ] Enable scaling after the Replica Set has started
+ - [ ] Enable scaling up after the Replica Set has started
