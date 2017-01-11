@@ -54,7 +54,7 @@ func HandleCommonArgs(
 	HandleCommonFlags(app, defaultServiceName, shortDescription)
 	HandleConfigSection(app)
 	HandleConnectionSection(app, connectionTypes)
-	//HandleEndpointsSection(app) omitted since callers likely don't have this
+	HandleEndpointsSection(app)
 	HandlePlanSection(app)
 	HandleStateSection(app)
 }

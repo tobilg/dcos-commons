@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/mesosphere/dcos-commons/cli"
+	"github.com/tobilg/dcos-commons/cli"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"log"
 )
