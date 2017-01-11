@@ -11,5 +11,30 @@
     "icon-small": "https://files.serv.sh/frameworks/mongodb-replicaset/images/icons/mongodb_48x48.png",
     "icon-medium": "https://files.serv.sh/frameworks/mongodb-replicaset/images/icons/mongodb_96x96.png",
     "icon-large": "https://files.serv.sh/frameworks/mongodb-replicaset/images/icons/mongodb_256x256.png"
+  },
+  "cli":{
+    "binaries":{
+      "darwin":{
+        "x86-64":{
+          "contentHash":[ { "algo":"sha256", "value":"{{sha256:dcos-mongodb-replicaset-darwin}}" } ],
+          "kind":"executable",
+          "url":"{{artifact-dir}}/dcos-mongodb-replicaset-darwin"
+        }
+      },
+      "linux":{
+        "x86-64":{
+          "contentHash":[ { "algo":"sha256", "value":"{{sha256:dcos-mongodb-replicaset-linux}}" } ],
+          "kind":"executable",
+          "url":"{{artifact-dir}}/dcos-mongodb-replicaset-linux"
+        }
+      },
+      "windows":{
+        "x86-64":{
+          "contentHash":[ { "algo":"sha256", "value":"{{sha256:dcos-mongodb-replicaset.exe}}" } ],
+          "kind":"executable",
+          "url":"{{artifact-dir}}/dcos-mongodb-replicaset.exe"
+        }
+      }
+    }
   }
 }
