@@ -1,11 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"github.com/mesosphere/dcos-commons/cli"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"log"
-	"strings"
 )
 
 func main() {
@@ -15,7 +13,6 @@ func main() {
 	}
 
 	cli.HandleCommonArgs(app, "mongodb-replicaset", "MongoDb Replica Set DC/OS CLI Module", []string{"foo", "bar"})
-	handleExampleSection(app)
 
 	// Omit modname:
 	kingpin.MustParse(app.Parse(cli.GetArguments()))
