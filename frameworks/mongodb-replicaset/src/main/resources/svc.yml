@@ -25,7 +25,6 @@ pods:
         goal: RUNNING
         cmd: "env && exec $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongod --bind_ip $LIBPROCESS_IP --port {{MONGODB_PORT}} --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}}"
         health-check:
-          name: "mongodb-server-health-check"
           cmd: "curl --fail ${LIBPROCESS_IP}:{{MONGODB_PORT}} > /dev/null"
           interval: 30
           grace-period: 60
