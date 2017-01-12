@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/tobilg/dcos-commons/cli"
+	"github.com/mesosphere/dcos-commons/cli"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"log"
 )
@@ -12,7 +12,12 @@ func main() {
 		log.Fatalf(err.Error())
 	}
 
-	cli.HandleCommonArgs(app, "mongodb-replicaset", "MongoDb Replica Set DC/OS CLI Module", []string{"foo", "bar"})
+	cli.HandleCommonFlags(app, "mongodb-replicaset", "MongoDb Replica Set DC/OS CLI Module")
+	cli.HandleConfigSection(app)
+	cli.HandlePodsSection(app)
+	cli.HandleEndpointsSection(app)
+	cli.HandlePlanSection(app)
+	cli.HandleStateSection(app)
 
 	// Omit modname:
 	kingpin.MustParse(app.Parse(cli.GetArguments()))
