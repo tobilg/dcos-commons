@@ -126,18 +126,6 @@ Example app definition (as long as the package is not yet in the Universe):
 }
 ```
 
-## Service discovery
-
-As the framework uses VIPs, you can use a simple MongoDB connection string to connect to the running Replica Set from inside the DC/OS cluster:
-
-```bash
-mongodb://mongodb.mongodb-replicaset.l4lb.thisdcos.directory:27017/?replicaSet={mongodb.replicaSetName}
-```
-
-where `{mongodb.replicaSetName}` is the Replica Set name you used while configuring the package.
-
-It will then use Minuteman under the hood to loadbalance the requests to individual MongoDB instances.
-
 ## CLI integration
 
 The `mongodb-replicaset` package has a integration in the DC/OS CLI (via the `dcos-commons` cli extensions), which is installed if you install the package via CLI.
@@ -191,8 +179,23 @@ Commands:
   config target_id
     List ID of the target configuration
 
-  connection [<type>]
-    View connection information (custom types: foo, bar)
+  pods list
+    Display the list of known pod instances
+
+  pods status [<pod>]
+    Display the status for tasks in one pod or all pods
+
+  pods info <pod>
+    Display the full state information for tasks in a pod
+
+  pods restart <pod>
+    Restarts a given pod without moving it to a new agent
+
+  pods replace <pod>
+    Destroys a given pod and moves it to a new agent
+
+  endpoints [<flags>] [<name>]
+    View client endpoints
 
   plan active
     Display the active operation chain, if any
@@ -224,6 +227,50 @@ Commands:
   state tasks
     List names of all persisted tasks
 ``` 
+
+## Service discovery
+
+If you have installed the DC/OS cli subcommand for `mongodb-replicaset` [as described](#cli-integration), then you can use the following command to retrieve the endpoints information: 
+
+```bash
+$ dcos mongodb-replicaset endpoints --native
+{
+  "mongodb": {
+    "direct": [
+      "172.17.0.5:27017",
+      "172.17.0.3:27017",
+      "172.17.0.4:27017"
+    ],
+    "vip": "mongodb.mongodb-replicaset.l4lb.thisdcos.directory:27017"
+  }
+}
+```
+
+If you pass the `--native` flag, the result will contain actual `<ip>:<port>` information. If you omit it, then Mesos DNS hostnames will be shown.
+
+As the framework uses VIPs, you can use a simple MongoDB connection string to connect to the running Replica Set from inside the DC/OS cluster:
+
+```bash
+mongodb://mongodb.mongodb-replicaset.l4lb.thisdcos.directory:27017/?replicaSet={mongodb.replicaSetName}
+```
+
+where `{mongodb.replicaSetName}` is the Replica Set name you used while configuring the package.
+
+It will then use Minuteman under the hood to loadbalance the requests to individual MongoDB instances.
+
+## Uninstallation
+
+To uninstall the service `mongodb-replicaset` (please adapt/replace accordingly if you used another service name):
+
+```bash
+$ dcos package uninstall --app-id=mongodb-replicaset mongodb-replicaset
+```
+
+Use the [framework cleaner](https://docs.mesosphere.com/1.8/usage/managing-services/uninstall/#framework-cleaner) to remove your Kafka instance from ZooKeeper and to destroy all data associated with it. The script requires several arguments, the values for which are derived from your service name:
+
+- `framework-role` is `mongodb-replicaset-role`
+- `framework-principal` is `mongodb-replicaset-principal`
+- `zk_path` is `dcos-service-mongodb-replicaset`
 
 ## Roadmap
 
