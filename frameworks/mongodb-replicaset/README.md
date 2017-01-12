@@ -32,7 +32,7 @@ If you want to customize the package, create an `options.json` file and add your
 }
 ```
 
-This would then launch a service called `my-mongodb-replicaset`, which uses `1` cpu, `4096` megabytes of memory, and `10000` megabytes of disk space (local persistent volume). Furthermore, the Replica Set name would be `my-rs`.
+This would then launch a service called `my-mongodb-replicaset`, which uses `1` cpu, `4096` megabytes of memory, and `10000` megabytes of disk space (local persistent volume) for each `mongo` instance. Furthermore, the Replica Set name would be `my-rs`.
 
 ### Via the DC/OS UI
 
@@ -225,8 +225,8 @@ Commands:
     List names of all persisted tasks
 ``` 
 
-
 ## Roadmap
 
  - [ ] Enable authorization
  - [ ] Enable scaling up after the Replica Set has started
+ 
