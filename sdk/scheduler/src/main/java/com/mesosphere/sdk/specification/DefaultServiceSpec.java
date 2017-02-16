@@ -10,9 +10,10 @@ import com.mesosphere.sdk.config.ConfigStoreException;
 import com.mesosphere.sdk.config.ConfigurationComparator;
 import com.mesosphere.sdk.config.ConfigurationFactory;
 import com.mesosphere.sdk.config.SerializationUtils;
-import com.mesosphere.sdk.offer.constrain.*;
+import com.mesosphere.sdk.offer.evaluate.placement.*;
 import com.mesosphere.sdk.specification.validation.UniquePodType;
 import com.mesosphere.sdk.specification.validation.ValidationUtils;
+import com.mesosphere.sdk.storage.StorageError.Reason;
 
 import javax.validation.Valid;
 import javax.validation.constraints.Min;
@@ -41,7 +42,7 @@ public class DefaultServiceSpec implements ServiceSpec {
     @NotNull
     @Min(value = 0, message = "API port value should be >= 0")
     private Integer apiPort;
-
+    private String webUrl;
     private String zookeeperConnection;
 
     @Valid
@@ -59,6 +60,7 @@ public class DefaultServiceSpec implements ServiceSpec {
             @JsonProperty("role") String role,
             @JsonProperty("principal") String principal,
             @JsonProperty("api-port") int apiPort,
+            @JsonProperty("web-url") String webUrl,
             @JsonProperty("zookeeper") String zookeeperConnection,
             @JsonProperty("pod-specs") List<PodSpec> pods,
             @JsonProperty("replacement-failure-policy") ReplacementFailurePolicy replacementFailurePolicy) {
@@ -66,23 +68,25 @@ public class DefaultServiceSpec implements ServiceSpec {
         this.role = role;
         this.principal = principal;
         this.apiPort = apiPort;
+        this.webUrl = webUrl;
         // If no zookeeperConnection string is configured, fallback to the default value.
         this.zookeeperConnection = StringUtils.isBlank(zookeeperConnection)
                 ? DEFAULT_ZK_CONNECTION : zookeeperConnection;
         this.pods = pods;
         this.replacementFailurePolicy = replacementFailurePolicy;
+        ValidationUtils.validate(this);
     }
 
     private DefaultServiceSpec(Builder builder) {
-        name = builder.name;
-        role = builder.role;
-        principal = builder.principal;
-        apiPort = builder.apiPort;
-        // If no zookeeperConnection string is configured, fallback to the default value.
-        zookeeperConnection = StringUtils.isBlank(builder.zookeeperConnection)
-                ? DEFAULT_ZK_CONNECTION : builder.zookeeperConnection;
-        pods = builder.pods;
-        replacementFailurePolicy = builder.replacementFailurePolicy;
+        this(
+                builder.name,
+                builder.role,
+                builder.principal,
+                builder.apiPort,
+                builder.webUrl,
+                builder.zookeeperConnection,
+                builder.pods,
+                builder.replacementFailurePolicy);
     }
 
     public static Builder newBuilder() {
@@ -96,6 +100,7 @@ public class DefaultServiceSpec implements ServiceSpec {
         builder.principal = copy.principal;
         builder.apiPort = copy.apiPort;
         builder.zookeeperConnection = copy.zookeeperConnection;
+        builder.webUrl = copy.webUrl;
         builder.pods = copy.pods;
         builder.replacementFailurePolicy = copy.replacementFailurePolicy;
         return builder;
@@ -119,6 +124,11 @@ public class DefaultServiceSpec implements ServiceSpec {
     @Override
     public int getApiPort() {
         return apiPort;
+    }
+
+    @Override
+    public String getWebUrl() {
+        return webUrl;
     }
 
     @Override
@@ -198,7 +208,7 @@ public class DefaultServiceSpec implements ServiceSpec {
             error.append("- Result:\n");
             error.append(loopbackSpecification.toJsonString());
             error.append('\n');
-            throw new ConfigStoreException(error.toString());
+            throw new ConfigStoreException(Reason.LOGIC_ERROR, error.toString());
         }
         return factory;
     }
@@ -230,6 +240,7 @@ public class DefaultServiceSpec implements ServiceSpec {
                 DefaultResourceSpec.class,
                 DefaultVolumeSpec.class,
                 PortSpec.class,
+                PortsSpec.class,
                 NamedVIPSpec.class);
 
         private final ObjectMapper objectMapper;
@@ -253,7 +264,7 @@ public class DefaultServiceSpec implements ServiceSpec {
                 return SerializationUtils.fromString(
                         new String(bytes, CHARSET), DefaultServiceSpec.class, objectMapper);
             } catch (IOException e) {
-                throw new ConfigStoreException(
+                throw new ConfigStoreException(Reason.SERIALIZATION_ERROR,
                         "Failed to deserialize DefaultServiceSpecification from JSON: " + e.getMessage(), e);
             }
         }
@@ -271,6 +282,7 @@ public class DefaultServiceSpec implements ServiceSpec {
         private String role;
         private String principal;
         private Integer apiPort;
+        private String webUrl;
         private String zookeeperConnection;
         private List<PodSpec> pods = new ArrayList<>();
         private ReplacementFailurePolicy replacementFailurePolicy;
@@ -320,6 +332,18 @@ public class DefaultServiceSpec implements ServiceSpec {
          */
         public Builder apiPort(Integer apiPort) {
             this.apiPort = apiPort;
+            return this;
+        }
+
+        /**
+         * Sets the advertised web UI URL for the service and returns a reference to this Builder so that the methods
+         * can be chained together.
+         *
+         * @param webUrl the web URL to set
+         * @return a reference to this Builder
+         */
+        public Builder webUrl(String webUrl) {
+            this.webUrl = webUrl;
             return this;
         }
 
@@ -375,9 +399,7 @@ public class DefaultServiceSpec implements ServiceSpec {
          * @return a {@code DefaultServiceSpec} built with parameters of this {@code DefaultServiceSpec.Builder}
          */
         public DefaultServiceSpec build() {
-            DefaultServiceSpec defaultServiceSpec = new DefaultServiceSpec(this);
-            ValidationUtils.validate(defaultServiceSpec);
-            return defaultServiceSpec;
+            return new DefaultServiceSpec(this);
         }
     }
 }

@@ -1,3 +1,5 @@
+apply plugin: 'java'
+
 ext {
     commonsCollectionsVer = "3.2.2"
     commonsIoVer = "2.4"
@@ -9,6 +11,39 @@ ext {
     awaitilityVer = "2.0.0"
     mustacheVer = "0.9.2"
     jacksonVer = "2.6.3"
+}
+
+task sourceJar(type: Jar) {
+    from sourceSets.main.allJava
+}
+
+publishing {
+    repositories {
+        maven {
+            if(project.version.endsWith('-SNAPSHOT')) {
+                url "s3://downloads.mesosphere.io/maven-snapshot/"
+            } else {
+                url "s3://downloads.mesosphere.io/maven/"
+            }
+            credentials(AwsCredentials) {
+                accessKey System.env['AWS_ACCESS_KEY_ID']
+                secretKey System.env['AWS_SECRET_ACCESS_KEY']
+            }
+        }
+        publications {
+            mavenJava(MavenPublication) {
+                groupId project.group
+                artifactId 'common'
+                version project.version
+
+                from components.java
+
+                artifact sourceJar {
+                    classifier "sources"
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -33,4 +68,12 @@ dependencies {
     testCompile "org.awaitility:awaitility:${awaitilityVer}"
 }
 
-apply plugin: 'java'
+check.finalizedBy jacocoTestReport
+
+jacocoTestReport {
+    reports {
+        xml.enabled false
+        csv.enabled false
+        html.destination "${buildDir}/jacocoHtml"
+    }
+}

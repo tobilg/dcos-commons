@@ -7,7 +7,7 @@ import com.mesosphere.sdk.offer.InvalidRequirementException;
 import com.mesosphere.sdk.scheduler.DefaultScheduler;
 import com.mesosphere.sdk.specification.*;
 import com.mesosphere.sdk.state.StateStore;
-import com.mesosphere.sdk.testing.CuratorTestUtils;
+import com.mesosphere.sdk.testutils.CuratorTestUtils;
 import com.mesosphere.sdk.testutils.OfferRequirementTestUtils;
 import com.mesosphere.sdk.testutils.TestConstants;
 import org.junit.Before;
@@ -37,7 +37,6 @@ public class DefaultStepFactoryTest {
     private static final PodSpec POD_SPEC = DefaultPodSpec.newBuilder()
             .type(TestConstants.POD_TYPE)
             .count(1)
-            .resources(Arrays.asList(taskSpec0.getResourceSet()))
             .tasks(Arrays.asList(taskSpec0, taskSpec1))
             .build();
 

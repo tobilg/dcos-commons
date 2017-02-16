@@ -1,10 +1,11 @@
 package com.mesosphere.sdk.scheduler.plan;
 
+import com.mesosphere.sdk.scheduler.plan.strategy.Strategy;
 import org.apache.mesos.Protos.TaskStatus;
 import com.mesosphere.sdk.scheduler.Observable;
-import com.mesosphere.sdk.scheduler.plan.strategy.Strategy;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -12,11 +13,8 @@ import java.util.UUID;
  * launch Mesos Tasks. {@link Plan}s, @{link Phase}s and {@link Step}s are all implementations of Elements.  Elements
  * have Strategies (see: {@link Strategy} associated with them which describe when child elements should be presented as
  * candidates for execution.
- *
- * @param <C> is the type of child {@link Element}s.
  */
-@SuppressWarnings("rawtypes")
-public interface Element<C extends Element> extends Observable {
+public interface Element extends Observable {
     /**
      * Returns the unique identifier of this Element.
      */
@@ -31,16 +29,6 @@ public interface Element<C extends Element> extends Observable {
      * Returns the Status of this Element.
      */
     Status getStatus();
-
-    /**
-     * Gets the children of this Element.
-     */
-    List<C> getChildren();
-
-    /**
-     * Gets the {@link Strategy} applied to the deployment of child Elements.
-     */
-    Strategy<C> getStrategy();
 
     /**
      * Provides the Element with a recent {@link TaskStatus} update which was received from Mesos.
@@ -110,9 +98,8 @@ public interface Element<C extends Element> extends Observable {
     }
 
     /**
-     * Indicates whether this Element is in progress.
+     * Provides the Element with a set of named string parameters that it can either use on start or provide to
+     * children, if it has any.
      */
-    default boolean isInProgress() {
-        return isPrepared() || isStarting();
-    }
+    default void updateParameters(Map<String, String> parameters) { }
 }

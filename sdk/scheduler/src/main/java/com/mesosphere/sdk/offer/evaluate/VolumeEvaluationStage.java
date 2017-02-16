@@ -2,14 +2,17 @@ package com.mesosphere.sdk.offer.evaluate;
 
 import com.google.protobuf.TextFormat;
 import com.mesosphere.sdk.offer.*;
-import org.apache.mesos.Protos;
 import org.apache.mesos.Protos.Resource;
 import org.apache.mesos.Protos.Resource.DiskInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
+
+import static com.mesosphere.sdk.offer.evaluate.EvaluationOutcome.*;
 
 /**
  * This class evaluates an offer against a given {@link com.mesosphere.sdk.offer.OfferRequirement}, ensuring that it
@@ -29,45 +32,46 @@ public class VolumeEvaluationStage extends ResourceEvaluationStage implements Of
     }
 
     @Override
-    public void evaluate(
-            MesosResourcePool mesosResourcePool,
-            OfferRequirement offerRequirement,
-            OfferRecommendationSlate offerRecommendationSlate) throws OfferEvaluationException {
+    public EvaluationOutcome evaluate(MesosResourcePool mesosResourcePool, PodInfoBuilder podInfoBuilder) {
         ResourceRequirement resourceRequirement = getResourceRequirement();
         Optional<MesosResource> mesosResourceOptional = mesosResourcePool.consume(resourceRequirement);
         if (!mesosResourceOptional.isPresent()) {
-            throw new OfferEvaluationException(String.format(
-                    "Failed to satisfy resource requirement: %s",
-                    TextFormat.shortDebugString(resourceRequirement.getResource())));
+            return fail(this, "Failed to satisfy required volume '%s': %s",
+                    resourceRequirement.getName(),
+                    TextFormat.shortDebugString(resourceRequirement.getResource()));
         }
 
         final MesosResource mesosResource = mesosResourceOptional.get();
-        Resource fulfilledResource = getFulfilledResource(mesosResource);
+        Resource fulfilledResource = getFulfilledResource(mesosResource.getResource());
+        Collection<OfferRecommendation> offerRecommendations = new ArrayList<>();
 
         if (resourceRequirement.reservesResource()) {
             logger.info("    Resource '{}' requires a RESERVE operation", resourceRequirement.getName());
-            offerRecommendationSlate.addReserveRecommendation(
-                    new ReserveOfferRecommendation(mesosResourcePool.getOffer(), fulfilledResource));
+            offerRecommendations.add(new ReserveOfferRecommendation(mesosResourcePool.getOffer(), fulfilledResource));
         }
 
         if (resourceRequirement.createsVolume()) {
             logger.info("    Resource '{}' requires a CREATE operation", resourceRequirement.getName());
-            offerRecommendationSlate.addCreateRecommendation(
-                    new CreateOfferRecommendation(mesosResourcePool.getOffer(), fulfilledResource));
+            offerRecommendations.add(new CreateOfferRecommendation(mesosResourcePool.getOffer(), fulfilledResource));
         }
 
         logger.info("  Generated '{}' resource for task: [{}]",
                 resourceRequirement.getName(), TextFormat.shortDebugString(fulfilledResource));
 
-        validateRequirements(offerRequirement);
-        setProtos(offerRequirement, fulfilledResource);
+        EvaluationOutcome failure = validateRequirements(podInfoBuilder.getOfferRequirement());
+        if (failure != null) {
+            return failure;
+        }
+
+        setProtos(podInfoBuilder, fulfilledResource);
+
+        return pass(this, offerRecommendations, "Offer contains sufficient '%s'", resourceRequirement.getName());
     }
 
     @Override
-    protected Protos.Resource getFulfilledResource(MesosResource mesosResource) {
-        Resource.Builder builder = super.getFulfilledResource(mesosResource).toBuilder();
-        Optional<DiskInfo> diskInfo = getFulfilledDiskInfo(mesosResource);
-
+    protected Resource getFulfilledResource(Resource resource) {
+        Resource.Builder builder = super.getFulfilledResource(resource).toBuilder();
+        Optional<DiskInfo> diskInfo = getFulfilledDiskInfo(resource);
         if (diskInfo.isPresent()) {
             builder.setDisk(diskInfo.get());
         }
@@ -75,15 +79,15 @@ public class VolumeEvaluationStage extends ResourceEvaluationStage implements Of
         return builder.build();
     }
 
-    private Optional<DiskInfo> getFulfilledDiskInfo(MesosResource mesRes) {
+    private Optional<DiskInfo> getFulfilledDiskInfo(Resource resource) {
         ResourceRequirement resourceRequirement = getResourceRequirement();
         if (!resourceRequirement.getResource().hasDisk()) {
             return Optional.empty();
         }
 
         DiskInfo.Builder builder = DiskInfo.newBuilder(resourceRequirement.getResource().getDisk());
-        if (mesRes.getResource().getDisk().hasSource()) {
-            builder.setSource(mesRes.getResource().getDisk().getSource());
+        if (resource.getDisk().hasSource()) {
+            builder.setSource(resource.getDisk().getSource());
         }
 
         Optional<DiskInfo.Persistence> persistence = getFulfilledPersistence();

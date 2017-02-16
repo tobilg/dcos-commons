@@ -3,7 +3,10 @@ package com.mesosphere.sdk.offer.evaluate;
 import com.mesosphere.sdk.offer.*;
 import org.apache.mesos.Protos;
 
+import java.util.Arrays;
 import java.util.Optional;
+
+import static com.mesosphere.sdk.offer.evaluate.EvaluationOutcome.*;
 
 /**
  * This class sets pod metadata on a {@link org.apache.mesos.Protos.TaskInfo} in an {@link OfferRequirement}, ensuring
@@ -17,25 +20,23 @@ public class LaunchEvaluationStage implements OfferEvaluationStage {
     }
 
     @Override
-    public void evaluate(
-            MesosResourcePool mesosResourcePool,
-            OfferRequirement offerRequirement,
-            OfferRecommendationSlate offerRecommendationSlate) {
-        Optional<ExecutorRequirement> executorRequirement = offerRequirement.getExecutorRequirementOptional();
+    public EvaluationOutcome evaluate(MesosResourcePool mesosResourcePool, PodInfoBuilder podInfoBuilder) {
+        Optional<Protos.ExecutorInfo.Builder> executorBuilder = podInfoBuilder.getExecutorBuilder();
         Protos.Offer offer = mesosResourcePool.getOffer();
-        Protos.TaskInfo.Builder taskBuilder = offerRequirement.getTaskRequirement(taskName).getTaskInfo().toBuilder();
+        Protos.TaskInfo.Builder taskBuilder = podInfoBuilder.getTaskBuilder(taskName);
 
         // Store metadata in the TaskInfo for later access by placement constraints:
-        if (executorRequirement.isPresent()) {
-            taskBuilder.setExecutor(executorRequirement.get().getExecutorInfo());
-        }
         taskBuilder = CommonTaskUtils.setOfferAttributes(taskBuilder, offer);
-        taskBuilder = CommonTaskUtils.setType(taskBuilder, offerRequirement.getType());
-        taskBuilder = CommonTaskUtils.setIndex(taskBuilder, offerRequirement.getIndex());
+        taskBuilder = CommonTaskUtils.setType(taskBuilder, podInfoBuilder.getOfferRequirement().getType());
+        taskBuilder = CommonTaskUtils.setIndex(taskBuilder, podInfoBuilder.getOfferRequirement().getIndex());
         taskBuilder = CommonTaskUtils.setHostname(taskBuilder, offer);
+        if (executorBuilder.isPresent()) {
+            taskBuilder.setExecutor(executorBuilder.get());
+        }
 
-        Protos.TaskInfo taskInfo = CommonTaskUtils.packTaskInfo(taskBuilder.build());
-        offerRequirement.updateTaskRequirement(taskBuilder.getName(), taskInfo);
-        offerRecommendationSlate.addLaunchRecommendation(new LaunchOfferRecommendation(offer, taskInfo));
+        return pass(
+                this,
+                Arrays.asList(new LaunchOfferRecommendation(offer, taskBuilder.build())),
+                "Added launch information to offer requirement");
     }
 }

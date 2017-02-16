@@ -1,9 +1,6 @@
 package com.mesosphere.sdk.api;
 
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -16,12 +13,14 @@ import com.mesosphere.sdk.api.types.EndpointProducer;
 import com.mesosphere.sdk.offer.CommonTaskUtils;
 import com.mesosphere.sdk.offer.ResourceUtils;
 import com.mesosphere.sdk.offer.TaskException;
+import com.mesosphere.sdk.specification.DefaultResourceSet;
 import com.mesosphere.sdk.state.StateStore;
 
 import org.apache.mesos.Protos.DiscoveryInfo;
 import org.apache.mesos.Protos.Label;
 import org.apache.mesos.Protos.Port;
 import org.apache.mesos.Protos.TaskInfo;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +34,6 @@ public class EndpointsResource {
 
     private static final String RESPONSE_KEY_DIRECT = "direct";
     private static final String RESPONSE_KEY_VIP = "vip";
-    private static final String VIP_HOST_TLD = "l4lb.thisdcos.directory";
 
     private final StateStore stateStore;
     private final String serviceName;
@@ -81,10 +79,11 @@ public class EndpointsResource {
     @GET
     public Response getEndpoints(@QueryParam("format") String format) {
         try {
-            JSONObject endpoints = new JSONObject();
+            List<String> endpoints = new ArrayList<>();
+
             // Custom values take precedence:
             for (Map.Entry<String, EndpointProducer> entry : customEndpoints.entrySet()) {
-                endpoints.put(entry.getKey(), entry.getValue().getEndpoint());
+                endpoints.add(entry.getKey());
             }
             // Add default values (when they don't collide with custom values):
             for (Map.Entry<String, JSONObject> endpointType :
@@ -92,11 +91,12 @@ public class EndpointsResource {
                             serviceName,
                             stateStore.fetchTasks(),
                             isNativeFormat(format)).entrySet()) {
-                if (!endpoints.has(endpointType.getKey())) {
-                    endpoints.put(endpointType.getKey(), endpointType.getValue());
+                if (!endpoints.contains(endpointType.getKey())) {
+                    endpoints.add(endpointType.getKey());
                 }
             }
-            return Response.ok(endpoints.toString(), MediaType.APPLICATION_JSON).build();
+
+            return Response.ok(new JSONArray(endpoints).toString(), MediaType.APPLICATION_JSON).build();
         } catch (Exception ex) {
             LOGGER.error(String.format("Failed to fetch list of endpoints with format %s", format), ex);
             return Response.serverError().build();
@@ -161,9 +161,9 @@ public class EndpointsResource {
             }
             // TODO(mrb): Also extract DiscoveryInfo from executor, when executors get the ability to specify resources
             DiscoveryInfo discoveryInfo = taskInfo.getDiscovery();
-            if (discoveryInfo.getVisibility() != DiscoveryInfo.Visibility.EXTERNAL) {
-                LOGGER.info("Task discovery information has {} visibility, EXTERNAL needed: {}",
-                        discoveryInfo.getVisibility(), taskInfo.getName());
+            if (discoveryInfo.getVisibility() != DefaultResourceSet.PUBLIC_VIP_VISIBILITY) {
+                LOGGER.info("Task discovery information has {} visibility, {} needed to be included in endpoints: {}",
+                        discoveryInfo.getVisibility(), DefaultResourceSet.PUBLIC_VIP_VISIBILITY, taskInfo.getName());
                 continue;
             }
             final String directHost;
@@ -226,7 +226,7 @@ public class EndpointsResource {
             vipEndpoint.append(RESPONSE_KEY_DIRECT, directHostPort);
             // populate 'vip' field if not yet populated (due to another task with the same vip):
             vipEndpoint.put(RESPONSE_KEY_VIP, String.format("%s.%s.%s:%d",
-                    vipInfo.name, serviceName, VIP_HOST_TLD, vipInfo.port));
+                    vipInfo.name, serviceName, ResourceUtils.VIP_HOST_TLD, vipInfo.port));
         }
 
         if (!foundAnyVips) {

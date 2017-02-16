@@ -1,102 +1,109 @@
 package com.mesosphere.sdk.hdfs.scheduler;
 
-import com.mesosphere.sdk.scheduler.DefaultScheduler;
-import com.mesosphere.sdk.specification.DefaultServiceSpec;
-import com.mesosphere.sdk.specification.yaml.YAMLServiceSpecFactory;
-import com.mesosphere.sdk.state.StateStoreCache;
-import org.apache.curator.test.TestingServer;
-import org.apache.mesos.SchedulerDriver;
-import org.junit.*;
-import org.junit.contrib.java.lang.system.EnvironmentVariables;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import com.google.common.collect.ImmutableMap;
+import com.mesosphere.sdk.config.DefaultTaskConfigRouter;
+import com.mesosphere.sdk.offer.CommonTaskUtils;
+import com.mesosphere.sdk.offer.Constants;
+import com.mesosphere.sdk.testing.BaseServiceSpecTest;
+import org.junit.Assert;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
-import java.io.File;
-import java.net.URL;
-import java.util.Collections;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
 
-import static com.mesosphere.sdk.specification.yaml.YAMLServiceSpecFactory.generateRawSpecFromYAML;
-
-public class ServiceSpecTest {
-    @ClassRule
-    public static final EnvironmentVariables environmentVariables = new EnvironmentVariables();
-
-    @Mock
-    private SchedulerDriver mockSchedulerDriver;
+public class ServiceSpecTest extends BaseServiceSpecTest {
 
     @BeforeClass
     public static void beforeAll() {
-        environmentVariables.set("EXECUTOR_URI", "");
-        environmentVariables.set("LIBMESOS_URI", "");
-        environmentVariables.set("PORT0", "8080");
-        environmentVariables.set("SERVICE_NAME", "hdfs");
-        environmentVariables.set("SERVICE_PRINCIPAL", "principal");
-        environmentVariables.set("JOURNAL_CPUS", "1.0");
-        environmentVariables.set("JOURNAL_MEM", "1024");
-        environmentVariables.set("JOURNAL_DISK", "1024");
-        environmentVariables.set("JOURNAL_DISK_TYPE", "MOUNT");
-        environmentVariables.set("JOURNAL_NODE_RPC_PORT", "1");
-        environmentVariables.set("JOURNAL_NODE_HTTP_PORT", "1");
-        environmentVariables.set("ZKFC_CPUS", "1.0");
-        environmentVariables.set("ZKFC_MEM", "1024");
-        environmentVariables.set("NAME_CPUS", "1.0");
-        environmentVariables.set("NAME_MEM", "1024");
-        environmentVariables.set("NAME_DISK", "1024");
-        environmentVariables.set("NAME_DISK_TYPE", "MOUNT");
-        environmentVariables.set("NAME_NODE_RPC_PORT", "1");
-        environmentVariables.set("NAME_NODE_HTTP_PORT", "1");
-        environmentVariables.set("DATA_COUNT", "3");
-        environmentVariables.set("DATA_CPUS", "1.0");
-        environmentVariables.set("DATA_MEM", "1024");
-        environmentVariables.set("DATA_DISK", "1024");
-        environmentVariables.set("DATA_DISK_TYPE", "MOUNT");
-        environmentVariables.set("DATA_NODE_RPC_PORT", "1");
-        environmentVariables.set("DATA_NODE_HTTP_PORT", "1");
-        environmentVariables.set("DATA_NODE_IPC_PORT", "1");
-        environmentVariables.set("JOURNAL_STRATEGY", "parallel");
-        environmentVariables.set("DATA_STRATEGY", "parallel");
-
-        URL resource = ServiceSpecTest.class.getClassLoader().getResource("hdfs-site.xml");
-        environmentVariables.set("CONFIG_TEMPLATE_PATH", new File(resource.getPath()).getParent());
-    }
-
-    @Before
-    public void beforeEach() {
-        MockitoAnnotations.initMocks(this);
+        ENV_VARS.set("PORT_API", "8080");
+        ENV_VARS.set("HDFS_VERSION", "hadoop-2.6.0-cdh5.9.1");
+        ENV_VARS.set("FRAMEWORK_NAME", "hdfs");
+        ENV_VARS.set("SERVICE_PRINCIPAL", "hdfs-principal");
+        ENV_VARS.set("JOURNAL_CPUS", "1.0");
+        ENV_VARS.set("JOURNAL_MEM", "256");
+        ENV_VARS.set("JOURNAL_DISK", "5000");
+        ENV_VARS.set("JOURNAL_DISK_TYPE", "ROOT");
+        ENV_VARS.set("JOURNAL_STRATEGY", "parallel");
+        ENV_VARS.set("NAME_CPUS", "1.0");
+        ENV_VARS.set("NAME_MEM", "256");
+        ENV_VARS.set("NAME_DISK", "5000");
+        ENV_VARS.set("NAME_DISK_TYPE", "ROOT");
+        ENV_VARS.set("ZKFC_CPUS", "1.0");
+        ENV_VARS.set("ZKFC_MEM", "256");
+        ENV_VARS.set("DATA_COUNT", "3");
+        ENV_VARS.set("DATA_CPUS", "1.0");
+        ENV_VARS.set("DATA_MEM", "256");
+        ENV_VARS.set("DATA_DISK", "5000");
+        ENV_VARS.set("DATA_DISK_TYPE", "ROOT");
+        ENV_VARS.set("DATA_STRATEGY", "parallel");
+        ENV_VARS.set("EXECUTOR_URI", "");
+        ENV_VARS.set("LIBMESOS_URI", "");
+        ENV_VARS.set("HDFS_URI", "");
+        ENV_VARS.set("BOOTSTRAP_URI", "");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_RPC_PORT","9001");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_HTTP_PORT","9002");
+        ENV_VARS.set("TASKCFG_ALL_JOURNAL_NODE_RPC_PORT","8485");
+        ENV_VARS.set("TASKCFG_ALL_JOURNAL_NODE_HTTP_PORT","8480");
+        ENV_VARS.set("TASKCFG_ALL_DATA_NODE_RPC_PORT","9003");
+        ENV_VARS.set("TASKCFG_ALL_DATA_NODE_HTTP_PORT","9004");
+        ENV_VARS.set("TASKCFG_ALL_DATA_NODE_IPC_PORT","9005");
+        ENV_VARS.set("TASKCFG_ALL_DATA_NODE_BALANCE_BANDWIDTH_PER_SEC","41943040");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_SAFEMODE_THRESHOLD_PCT","0.9");
+        ENV_VARS.set("TASKCFG_ALL_DATA_NODE_HANDLER_COUNT","10");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_HANDLER_COUNT","20");
+        ENV_VARS.set("TASKCFG_ALL_PERMISSIONS_ENABLED","false");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_HEARTBEAT_RECHECK_INTERVAL","60000");
+        ENV_VARS.set("TASKCFG_ALL_IMAGE_COMPRESS","true");
+        ENV_VARS.set("TASKCFG_ALL_IMAGE_COMPRESSION_CODEC","org.apache.hadoop.io.compress.SnappyCodec");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_INVALIDATE_WORK_PCT_PER_ITERATION","0.95");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_REPLICATION_WORK_MULTIPLIER_PER_ITERATION","4");
+        ENV_VARS.set("TASKCFG_ALL_CLIENT_READ_SHORTCIRCUIT","true");
+        ENV_VARS.set("TASKCFG_ALL_CLIENT_READ_SHORTCIRCUIT_PATH","/var/lib/hadoop-hdfs/dn_socket");
+        ENV_VARS.set("TASKCFG_ALL_CLIENT_READ_SHORTCIRCUIT_STREAMS_CACHE_SIZE","1000");
+        ENV_VARS.set("TASKCFG_ALL_CLIENT_READ_SHORTCIRCUIT_STREAMS_CACHE_SIZE_EXPIRY_MS","1000");
+        ENV_VARS.set("TASKCFG_ALL_NAME_NODE_DATA_NODE_REGISTRATION_IP_HOSTNAME_CHECK", "false");
+        ENV_VARS.set("TASKCFG_ALL_HA_FENCING_METHODS", "shell(/bin/true)");
+        ENV_VARS.set("TASKCFG_ALL_HA_AUTOMATIC_FAILURE", "true");
+        ENV_VARS.set("TASKCFG_ALL_CLIENT_FAILOVER_PROXY_PROVIDER_HDFS", "org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider");
+        ENV_VARS.set("TASKCFG_ALL_HADOOP_PROXYUSER_HUE_HOSTS", "*");
+        ENV_VARS.set("TASKCFG_ALL_HADOOP_PROXYUSER_HUE_GROUPS", "*");
+        ENV_VARS.set("TASKCFG_ALL_HADOOP_PROXYUSER_ROOT_HOSTS", "*");
+        ENV_VARS.set("TASKCFG_ALL_HADOOP_PROXYUSER_ROOT_GROUPS", "*");
+        ENV_VARS.set("TASKCFG_ALL_HADOOP_PROXYUSER_HTTPFS_GROUPS", "*");
+        ENV_VARS.set("TASKCFG_ALL_HADOOP_PROXYUSER_HTTPFS_HOSTS", "*");
     }
 
     @Test
-    public void testOneTimePlanDeserialization() throws Exception {
-        testDeserialization("hdfs_svc.yml");
+    public void testYaml() throws Exception {
+        super.testYaml("svc.yml");
     }
 
     @Test
-    public void testOneTimePlanValidation() throws Exception {
-        testValidation("hdfs_svc.yml");
+    public void testRenderHdfsSiteXml() throws IOException {
+        renderTemplate(System.getProperty("user.dir") + "/src/main/dist/hdfs-site.xml");
     }
 
-    private void testDeserialization(String yamlFileName) throws Exception {
-        ClassLoader classLoader = getClass().getClassLoader();
-        File file = new File(classLoader.getResource(yamlFileName).getFile());
-
-        DefaultServiceSpec serviceSpec = YAMLServiceSpecFactory
-                .generateServiceSpec(generateRawSpecFromYAML(file));
-        Assert.assertNotNull(serviceSpec);
-        Assert.assertEquals(8080, serviceSpec.getApiPort());
-        DefaultServiceSpec.getFactory(serviceSpec, Collections.emptyList());
+    @Test
+    public void testRenderCoreSiteXml() throws IOException {
+        renderTemplate(System.getProperty("user.dir") + "/src/main/dist/core-site.xml");
     }
 
-    private void testValidation(String yamlFileName) throws Exception {
-        File file = new File(getClass().getClassLoader().getResource(yamlFileName).getFile());
-        DefaultServiceSpec serviceSpec = YAMLServiceSpecFactory
-                .generateServiceSpec(generateRawSpecFromYAML(file));
+    private void renderTemplate(String pathStr) throws IOException {
+        Path path = Paths.get(pathStr);
+        byte[] bytes = Files.readAllBytes(path);
+        String fileStr = new String(bytes, Charset.defaultCharset());
+        ImmutableMap<String, String> allEnv = new DefaultTaskConfigRouter().getConfig("ALL").getAllEnv();
+        Map<String, String> updatedEnv = new HashMap<>(allEnv);
+        updatedEnv.put(Constants.FRAMEWORK_NAME_KEY, System.getenv(Constants.FRAMEWORK_NAME_KEY));
 
-        TestingServer testingServer = new TestingServer();
-        StateStoreCache.resetInstanceForTests();
-        DefaultScheduler.newBuilder(serviceSpec)
-            .setStateStore(DefaultScheduler.createStateStore(serviceSpec, testingServer.getConnectString()))
-            .setConfigStore(DefaultScheduler.createConfigStore(serviceSpec, testingServer.getConnectString()))
-            .build();
-        testingServer.close();
+        String renderedFileStr = CommonTaskUtils.applyEnvToMustache(fileStr, updatedEnv);
+        Assert.assertEquals(-1, renderedFileStr.indexOf("<value></value>"));
+        Assert.assertTrue(CommonTaskUtils.isMustacheFullyRendered(renderedFileStr));
     }
 }

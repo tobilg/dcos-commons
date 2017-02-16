@@ -1,8 +1,5 @@
 package com.mesosphere.sdk.offer;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.mesosphere.sdk.specification.ConfigFileSpec;
-import com.mesosphere.sdk.specification.DefaultConfigFileSpec;
 import com.mesosphere.sdk.testutils.TestConstants;
 import org.apache.commons.io.FileUtils;
 import org.apache.mesos.Protos;
@@ -13,9 +10,7 @@ import org.junit.contrib.java.lang.system.EnvironmentVariables;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * This class tests the CommonTaskUtils class.
@@ -53,27 +48,38 @@ public class CommonTaskUtilsTest {
     }
 
     @Test
-    public void testSetGetConfigTemplates() throws InvalidProtocolBufferException {
-        Protos.TaskInfo.Builder taskBuilder = getTestTaskInfo().toBuilder();
-        Collection<ConfigFileSpec> configs = Arrays.asList(
-                new DefaultConfigFileSpec("../relative/path/to/config", "this is a config template"),
-                new DefaultConfigFileSpec("../relative/path/to/config2", "this is a second config template"));
-        CommonTaskUtils.setConfigFiles(taskBuilder, configs);
-        Assert.assertEquals(configs, CommonTaskUtils.getConfigFiles(taskBuilder.build()));
-    }
+    public void testSetGetOfferAttributes() {
+        Protos.Offer.Builder offerBuilder = Protos.Offer.newBuilder()
+                .setId(TestConstants.OFFER_ID)
+                .setFrameworkId(TestConstants.FRAMEWORK_ID)
+                .setSlaveId(TestConstants.AGENT_ID)
+                .setHostname(TestConstants.HOSTNAME);
+        Protos.Attribute.Builder attrBuilder =
+                offerBuilder.addAttributesBuilder().setName("1").setType(Protos.Value.Type.RANGES);
+        attrBuilder.getRangesBuilder().addRangeBuilder().setBegin(5).setEnd(6);
+        attrBuilder.getRangesBuilder().addRangeBuilder().setBegin(10).setEnd(12);
+        attrBuilder = offerBuilder.addAttributesBuilder().setName("2").setType(Protos.Value.Type.SCALAR);
+        attrBuilder.getScalarBuilder().setValue(123.4567);
+        attrBuilder = offerBuilder.addAttributesBuilder().setName("3").setType(Protos.Value.Type.SET);
+        attrBuilder.getSetBuilder().addItem("foo").addItem("bar").addItem("baz");
+        attrBuilder = offerBuilder.addAttributesBuilder().setName("4").setType(Protos.Value.Type.RANGES);
+        attrBuilder.getRangesBuilder().addRangeBuilder().setBegin(7).setEnd(8);
+        attrBuilder.getRangesBuilder().addRangeBuilder().setBegin(10).setEnd(12);
 
-    @Test(expected = IllegalStateException.class)
-    public void testSetTemplatesTooBig() throws InvalidProtocolBufferException {
-        Protos.TaskInfo.Builder taskBuilder = getTestTaskInfo().toBuilder();
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < 256 * 1024; ++i) {
-            sb.append('a');
-        }
-        Collection<ConfigFileSpec> configs = Arrays.asList(
-                new DefaultConfigFileSpec("../relative/path/to/config", sb.toString()),
-                new DefaultConfigFileSpec("../relative/path/to/config2", sb.toString()),
-                new DefaultConfigFileSpec("../relative/path/to/config3", "a"));
-        CommonTaskUtils.setConfigFiles(taskBuilder, configs);
+        Assert.assertTrue(CommonTaskUtils.getOfferAttributeStrings(getTestTaskInfo()).isEmpty());
+
+        Protos.TaskInfo.Builder tb = CommonTaskUtils.setOfferAttributes(
+                getTestTaskInfo().toBuilder(), offerBuilder.build());
+        List<String> expectedStrings = new ArrayList<>();
+        expectedStrings.add("1:[5-6,10-12]");
+        expectedStrings.add("2:123.457");
+        expectedStrings.add("3:{foo,bar,baz}");
+        expectedStrings.add("4:[7-8,10-12]");
+        Assert.assertEquals(expectedStrings, CommonTaskUtils.getOfferAttributeStrings(tb.build()));
+
+        tb = CommonTaskUtils.setOfferAttributes(
+                getTestTaskInfo().toBuilder(), offerBuilder.clearAttributes().build());
+        Assert.assertTrue(CommonTaskUtils.getOfferAttributeStrings(tb.build()).isEmpty());
     }
 
     @Test(expected = TaskException.class)
@@ -82,23 +88,31 @@ public class CommonTaskUtilsTest {
     }
 
     @Test
+    public void testTaskLostNeedsRecovery() {
+        Protos.TaskStatus taskStatus = Protos.TaskStatus.newBuilder()
+                .setTaskId(Protos.TaskID.newBuilder().setValue(UUID.randomUUID().toString()))
+                .setState(Protos.TaskState.TASK_LOST)
+                .build();
+        Assert.assertTrue(CommonTaskUtils.isRecoveryNeeded(taskStatus));
+    }
+
+    @Test
     public void testSetGetTaskType() throws TaskException {
         Assert.assertEquals("foo", CommonTaskUtils.getType(CommonTaskUtils.setType(
                 getTestTaskInfo().toBuilder(), "foo").build()));
         Assert.assertEquals("", CommonTaskUtils.getType(CommonTaskUtils.setType(
                 getTestTaskInfo().toBuilder(), "").build()));
-
     }
 
     @Test
     public void testApplyEnvToMustache() throws IOException {
-        environmentVariables.set("PORT0", "8080");
+        environmentVariables.set("PORT_API", String.valueOf(TestConstants.PORT_API_VALUE));
         ClassLoader classLoader = getClass().getClassLoader();
         File file = new File(classLoader.getResource("valid-exhaustive.yml").getFile());
         String yaml = FileUtils.readFileToString(file);
-        Assert.assertTrue(yaml.contains("api-port: {{PORT0}}"));
+        Assert.assertTrue(yaml.contains("api-port: {{PORT_API}}"));
         String renderedYaml = CommonTaskUtils.applyEnvToMustache(yaml, System.getenv());
-        Assert.assertTrue(renderedYaml.contains("api-port: 8080"));
+        Assert.assertTrue(renderedYaml.contains(String.format("api-port: %d", TestConstants.PORT_API_VALUE)));
     }
 
     @Test

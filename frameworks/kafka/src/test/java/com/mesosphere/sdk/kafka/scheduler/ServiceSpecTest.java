@@ -1,82 +1,35 @@
 package com.mesosphere.sdk.kafka.scheduler;
 
-import org.apache.curator.test.TestingServer;
-import org.apache.mesos.Protos;
-import org.apache.mesos.Scheduler;
-import org.apache.mesos.SchedulerDriver;
-import com.mesosphere.sdk.scheduler.DefaultScheduler;
-import com.mesosphere.sdk.specification.DefaultServiceSpec;
-import com.mesosphere.sdk.specification.yaml.YAMLServiceSpecFactory;
-import org.junit.*;
-import org.junit.contrib.java.lang.system.EnvironmentVariables;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import com.mesosphere.sdk.testing.BaseServiceSpecTest;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
-import java.io.File;
-import java.net.URL;
-import java.util.Collections;
-
-import static com.mesosphere.sdk.specification.yaml.YAMLServiceSpecFactory.generateRawSpecFromYAML;
-
-public class ServiceSpecTest {
-    @ClassRule
-    public static final EnvironmentVariables environmentVariables = new EnvironmentVariables();
-
-    @Mock
-    private SchedulerDriver mockSchedulerDriver;
-
+public class ServiceSpecTest extends BaseServiceSpecTest {
     @BeforeClass
     public static void beforeAll() {
-        environmentVariables.set("EXECUTOR_URI", "");
-        environmentVariables.set("LIBMESOS_URI", "");
-        environmentVariables.set("PORT0", "8080");
-        environmentVariables.set("BROKER_COUNT", "2");
-        environmentVariables.set("BROKER_CPUS", "0.1");
-        environmentVariables.set("BROKER_MEM", "512");
-        environmentVariables.set("BROKER_DISK", "5000");
-        URL resource = ServiceSpecTest.class.getClassLoader().getResource("server.properties.mustache");
-        environmentVariables.set("CONFIG_TEMPLATE_PATH", new File(resource.getPath()).getParent());
-    }
+        ENV_VARS.set("FRAMEWORK_NAME", "kafka");
+        ENV_VARS.set("FRAMEWORK_PRINCIPLE","kafka-principle");
+        ENV_VARS.set("MESOS_ZOOKEEPER_URI","master.mesos:2811");
+        ENV_VARS.set("CONFIG_TEMPLATE_PATH","frameworks/kafka");
+        ENV_VARS.set("KAFKA_URI", "some_uri");
+        ENV_VARS.set("BOOTSTRAP_URI", "another_uri");
+        ENV_VARS.set("PLACEMENT_CONSTRAINTS","");
+        ENV_VARS.set("PHASE_STRATEGY","serial");
+        ENV_VARS.set("KAFKA_VERSION_PATH","somepath");
+        ENV_VARS.set("PORT_API", "8080");
+        ENV_VARS.set("BROKER_COUNT", "2");
+        ENV_VARS.set("BROKER_CPUS", "0.1");
+        ENV_VARS.set("BROKER_MEM", "512");
+        ENV_VARS.set("BROKER_DISK_SIZE", "5000");
+        ENV_VARS.set("BROKER_DISK_TYPE", "ROOT");
+        ENV_VARS.set("BROKER_DATA_PATH", "ROOT");
+        ENV_VARS.set("PORT_BROKER_PORT","9999");
+        ENV_VARS.set("BROKER_PORT","0");
 
-    @Before
-    public void beforeEach() {
-        MockitoAnnotations.initMocks(this);
-    }
-
-    @Test
-    public void testServiceSpecDeserialization() throws Exception {
-        ClassLoader classLoader = ServiceSpecTest.class.getClassLoader();
-        File file = new File(classLoader.getResource("svc.yml").getFile());
-
-        DefaultServiceSpec serviceSpec = YAMLServiceSpecFactory
-                .generateServiceSpec(generateRawSpecFromYAML(file));
-        Assert.assertNotNull(serviceSpec);
-        Assert.assertEquals(8080, serviceSpec.getApiPort());
-        DefaultServiceSpec.getFactory(serviceSpec, Collections.emptyList());
     }
 
     @Test
-    public void testServiceSpecValidation() throws Exception {
-        File file = new File(getClass().getClassLoader().getResource("svc.yml").getFile());
-        DefaultServiceSpec serviceSpec = YAMLServiceSpecFactory.generateServiceSpec(generateRawSpecFromYAML(file));
-
-        TestingServer testingServer = new TestingServer();
-
-        Protos.FrameworkID FRAMEWORK_ID = Protos.FrameworkID.newBuilder()
-                .setValue("test-framework-id")
-                .build();
-
-        Protos.MasterInfo MASTER_INFO = Protos.MasterInfo.newBuilder()
-                .setId("test-master-id")
-                .setIp(0)
-                .setPort(0)
-                .build();
-
-        Scheduler scheduler = DefaultScheduler.newBuilder(serviceSpec)
-            .setStateStore(DefaultScheduler.createStateStore(serviceSpec, testingServer.getConnectString()))
-            .setConfigStore(DefaultScheduler.createConfigStore(serviceSpec, testingServer.getConnectString()))
-            .build();
-        scheduler.registered(mockSchedulerDriver, FRAMEWORK_ID, MASTER_INFO);
-        testingServer.close();
+    public void testYaml() throws Exception {
+        super.testYaml("svc.yml");
     }
 }

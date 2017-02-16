@@ -9,6 +9,7 @@ allprojects {
     apply plugin: 'java'
     apply plugin: 'maven'
     apply plugin: 'eclipse'
+    apply plugin: 'jacoco'
     apply plugin: 'idea'
     apply plugin: 'maven-publish'
     apply plugin: 'com.github.ksoichiro.console.reporter'
@@ -25,7 +26,7 @@ allprojects {
     // at ANY TIME as changes are merged into master. They represent a fully unstable API.
     // ---
     group = "mesosphere"
-    version = "0.10.0-SNAPSHOT"
+    version = "0.11.1-SNAPSHOT"
 
     sourceCompatibility = '1.8'
     targetCompatibility = '1.8'
@@ -67,6 +68,13 @@ allprojects {
         testLogging {
             events "passed", "skipped", "failed"
         }
+    }
+
+    task copyExecutor(type: Copy) {
+        from('src/../../../sdk/executor/build/distributions/') {
+            include '**/*'
+        }
+        into('build/distributions')
     }
 }
 

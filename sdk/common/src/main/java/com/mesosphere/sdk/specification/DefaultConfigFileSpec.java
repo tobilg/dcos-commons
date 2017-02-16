@@ -1,6 +1,5 @@
 package com.mesosphere.sdk.specification;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
@@ -8,29 +7,28 @@ import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.io.File;
-import java.io.IOException;
-
 /**
  * Basic implementation of {@link ConfigFileSpec} which returns the provided values.
  */
 public class DefaultConfigFileSpec implements ConfigFileSpec {
 
+    private final String name;
     private final String relativePath;
     private final String templateContent;
 
     @JsonCreator
     public DefaultConfigFileSpec(
+            @JsonProperty("name") String name,
             @JsonProperty("relative-path") String relativePath,
             @JsonProperty("template-content") String templateContent) {
+        this.name = name;
         this.relativePath = relativePath;
         this.templateContent = templateContent;
     }
 
-    public DefaultConfigFileSpec(
-            String relativePath,
-            File templateFile) throws IOException {
-        this(relativePath, FileUtils.readFileToString(templateFile, "UTF-8"));
+    @Override
+    public String getName() {
+        return name;
     }
 
     @Override

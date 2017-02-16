@@ -6,10 +6,13 @@ import org.apache.mesos.Protos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+
+import static com.mesosphere.sdk.offer.evaluate.EvaluationOutcome.*;
 
 /**
  * This class evaluates an offer for remaining reserved resources in the offer that have only been partially claimed by
@@ -26,20 +29,18 @@ public class ReservationEvaluationStage implements OfferEvaluationStage {
     }
 
     @Override
-    public void evaluate(
-            MesosResourcePool mesosResourcePool,
-            OfferRequirement offerRequirement,
-            OfferRecommendationSlate offerRecommendationSlate) {
+    public EvaluationOutcome evaluate(MesosResourcePool mesosResourcePool, PodInfoBuilder podInfoBuilder) {
         Map<String, MesosResource> reservedResources = mesosResourcePool.getReservedPool();
+        Collection<OfferRecommendation> recommendations = new ArrayList<>();
         for (Map.Entry<String, MesosResource> entry : reservedResources.entrySet()) {
             if (resourceIds.contains(entry.getKey())) {
                 logger.info("    Remaining reservation for resource {} unclaimed, generating UNRESERVE operation",
                         TextFormat.shortDebugString(entry.getValue().getResource()));
                 Protos.Resource unreserveResource = ResourceUtils.setResourceId(
                         entry.getValue().getResource(), entry.getKey());
-                offerRecommendationSlate.addUnreserveRecommendation(
-                        new UnreserveOfferRecommendation(mesosResourcePool.getOffer(), unreserveResource));
+                recommendations.add(new UnreserveOfferRecommendation(mesosResourcePool.getOffer(), unreserveResource));
             }
         }
+        return pass(this, recommendations, "Added reservation information to offer requirement");
     }
 }

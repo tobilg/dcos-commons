@@ -1,8 +1,8 @@
 package com.mesosphere.sdk.scheduler.plan;
 
+import com.mesosphere.sdk.offer.OfferRecommendation;
 import com.mesosphere.sdk.offer.OfferRequirement;
 import com.mesosphere.sdk.scheduler.Observable;
-import org.apache.mesos.Protos.Offer;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -16,27 +16,26 @@ import java.util.Optional;
  * <p>
  * See {@link Plan} docs for more background.
  */
-@SuppressWarnings("rawtypes")
-public interface Step extends Element {
+public interface Step extends Element, Interruptible {
     /**
      * Starts the Step, whose {@link Status} should be {@link Status#PENDING}. Returns an
      * {@link OfferRequirement}, or an empty Optional if obtaining/updating resource requirements are not
      * applicable to the Step. This will continue to be called for as long as {@link Element#isPending()} returns
      * true.
      *
-     * @see {@link #updateOfferStatus(Collection<Offer.Operation>)} which returns the outcome of the
-     *      {@link OfferRequirement}
+     * @see {@link #updateOfferStatus(Collection<org.apache.mesos.Protos.Offer.Operation>)} which returns the outcome of
+     *      the {@link OfferRequirement}
      */
     Optional<PodInstanceRequirement> start();
 
     /**
      * Notifies the Step whether the {@link PodInstanceRequirement} previously returned by
-     * {@link #start()} has been successfully accepted/fulfilled. The {@code operations} param is
-     * empty when no offers matching the requirement previously returned by {@link #clone()
-     * could be found. This is only called if {@link #getOfferRequirement()} returned a non-{@code null}
-     * {@link OfferRequirement}.
+     * {@link #start()} has been successfully accepted/fulfilled. The {@code recommendations} param is
+     * empty when no offers matching the requirement previously returned by {@link #start()}
+     * could be found. This is only called if {@link #start()} returned a non-empty
+     * {@link PodInstanceRequirement}.
      */
-    void updateOfferStatus(Collection<Offer.Operation> operations);
+    void updateOfferStatus(Collection<OfferRecommendation> recommendations);
 
     /**
      * Return the Asset that this Step intends to work on.
@@ -47,7 +46,9 @@ public interface Step extends Element {
     /**
      * Reports whether the Asset associated with this Step is dirty.
      */
-    boolean isAssetDirty();
+    default boolean isAssetDirty() {
+        return isPrepared() || isStarting();
+    }
 
     /**
      * Thrown on invalid Step construction attempt.

@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.stream.IntStream;
 
 /**
  * This class encapsulates common methods for manipulating Resources.
@@ -22,6 +23,7 @@ public class ResourceUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger(ResourceUtils.class);
 
     public static final String VIP_PREFIX = "VIP_";
+    public static final String VIP_HOST_TLD = "l4lb.thisdcos.directory";
 
     public static Resource getUnreservedResource(String name, Value value) {
         return setResource(Resource.newBuilder().setRole("*"), name, value);
@@ -29,6 +31,21 @@ public class ResourceUtils {
 
     public static Resource getDesiredResource(ResourceSpec resourceSpec) {
         return getDesiredResource(
+                resourceSpec.getRole(),
+                resourceSpec.getPrincipal(),
+                resourceSpec.getName(),
+                resourceSpec.getValue());
+    }
+
+    public static Resource getDesiredResource(String role, String principal, String name, Value value) {
+        return Resource.newBuilder(getUnreservedResource(name, value))
+                .setRole(role)
+                .setReservation(getDesiredReservationInfo(principal))
+                .build();
+    }
+
+    public static Resource getExpectedResource(ResourceSpec resourceSpec) {
+        return getExpectedResource(
                 resourceSpec.getRole(),
                 resourceSpec.getPrincipal(),
                 resourceSpec.getName(),
@@ -79,6 +96,25 @@ public class ResourceUtils {
         return resBuilder.build();
     }
 
+    public static Resource withValue(Resource resource, Value value) {
+        if (resource.getType() != value.getType()) {
+            throw new IllegalArgumentException(
+                    String.format("Resource type %s does not equal value type %s",
+                            resource.getType().toString(), value.getType().toString()));
+        }
+
+        switch (resource.getType()) {
+            case SCALAR:
+                return resource.toBuilder().setScalar(value.getScalar()).build();
+            case RANGES:
+                return resource.toBuilder().setRanges(value.getRanges()).build();
+            case SET:
+                return resource.toBuilder().setSet(value.getSet()).build();
+            default:
+                throw new IllegalArgumentException("Unknown resource type: " + resource.getType().toString());
+        }
+    }
+
     public static Resource getUnreservedRootVolume(double diskSize) {
         Value diskValue = Value.newBuilder()
                 .setType(Value.Type.SCALAR)
@@ -104,6 +140,7 @@ public class ResourceUtils {
     public static Resource getExpectedRootVolume(
             double diskSize,
             String resourceId,
+            String containerPath,
             String role,
             String principal,
             String persistenceId) {
@@ -113,16 +150,24 @@ public class ResourceUtils {
                 .build();
         Resource.Builder resBuilder = Resource.newBuilder(ResourceUtils.getUnreservedResource("disk", diskValue));
         resBuilder.setRole(role);
-        resBuilder.setDisk(getExpectedRootVolumeDiskInfo(persistenceId, principal));
+        resBuilder.setDisk(getExpectedRootVolumeDiskInfo(persistenceId, containerPath, principal));
         resBuilder.setReservation(getExpectedReservationInfo(resourceId, principal));
 
         return resBuilder.build();
     }
 
-    public static Resource getDesiredResource(String role, String principal, String name, Value value) {
+    public static Resource getExpectedResource(String role, String principal, String name, Value value) {
+        return getExpectedResource(role, principal, name, value, "");
+    }
+
+    public static Resource getExpectedResource(String role,
+                                               String principal,
+                                               String name,
+                                               Value value,
+                                               String resourceId) {
         return Resource.newBuilder(getUnreservedResource(name, value))
                 .setRole(role)
-                .setReservation(getDesiredReservationInfo(principal))
+                .setReservation(getDesiredReservationInfo(principal, resourceId))
                 .build();
     }
 
@@ -159,7 +204,7 @@ public class ResourceUtils {
                 .setType(Value.Type.SCALAR)
                 .setScalar(Value.Scalar.newBuilder().setValue(value))
                 .build();
-        return getDesiredResource(role, principal, name, val);
+        return getExpectedResource(role, principal, name, val);
     }
 
     public static Resource getUnreservedRanges(String name, List<Range> ranges) {
@@ -174,7 +219,7 @@ public class ResourceUtils {
     }
 
     public static Resource getDesiredRanges(String role, String principal, String name, List<Range> ranges) {
-        return getDesiredResource(
+        return getExpectedResource(
                 role,
                 principal,
                 name,
@@ -205,47 +250,85 @@ public class ResourceUtils {
     }
 
     public static TaskInfo.Builder addVIP(
-            TaskInfo.Builder builder, String vipName, Integer vipPort, Resource resource) {
+            TaskInfo.Builder builder,
+            String vipName,
+            Integer vipPort,
+            String protocol,
+            DiscoveryInfo.Visibility visibility,
+            Resource resource) {
         if (builder.hasDiscovery()) {
-            addVIP(builder.getDiscoveryBuilder(), vipName, vipPort, (int) resource.getRanges().getRange(0).getBegin());
+            addVIP(
+                    builder.getDiscoveryBuilder(),
+                    vipName,
+                    protocol,
+                    vipPort,
+                    (int) resource.getRanges().getRange(0).getBegin());
         } else {
-            builder.setDiscovery(getVIPDiscoveryInfo(builder.getName(), vipName, vipPort, resource));
+            builder.setDiscovery(getVIPDiscoveryInfo(
+                    builder.getName(),
+                    vipName,
+                    vipPort,
+                    protocol,
+                    visibility,
+                    resource));
         }
 
         return builder;
     }
 
     public static ExecutorInfo.Builder addVIP(
-            ExecutorInfo.Builder builder, String vipName, Integer vipPort, Resource resource) {
+            ExecutorInfo.Builder builder,
+            String vipName,
+            Integer vipPort,
+            String protocol,
+            DiscoveryInfo.Visibility visibility,
+            Resource resource) {
         if (builder.hasDiscovery()) {
-            addVIP(builder.getDiscoveryBuilder(), vipName, vipPort, (int) resource.getRanges().getRange(0).getBegin());
+            addVIP(
+                    builder.getDiscoveryBuilder(),
+                    vipName,
+                    protocol,
+                    vipPort,
+                    (int) resource.getRanges().getRange(0).getBegin());
         } else {
-            builder.setDiscovery(getVIPDiscoveryInfo(builder.getName(), vipName, vipPort, resource));
+            builder.setDiscovery(getVIPDiscoveryInfo(
+                    builder.getName(),
+                    vipName,
+                    vipPort,
+                    protocol,
+                    visibility,
+                    resource));
         }
 
         return builder;
     }
 
     private static DiscoveryInfo.Builder addVIP(
-            DiscoveryInfo.Builder builder, String vipName, Integer vipPort, int destPort) {
+            DiscoveryInfo.Builder builder, String vipName, String protocol, Integer vipPort, int destPort) {
         builder.getPortsBuilder()
                 .addPortsBuilder()
                 .setNumber(destPort)
-                .setProtocol("tcp")
+                .setProtocol(protocol)
                 .getLabelsBuilder()
                 .addLabels(getVIPLabel(vipName, vipPort));
 
         return builder;
     }
 
-    public static DiscoveryInfo getVIPDiscoveryInfo(String taskName, String vipName, Integer vipPort, Resource r) {
+    public static DiscoveryInfo getVIPDiscoveryInfo(
+            String taskName,
+            String vipName,
+            Integer vipPort,
+            String protocol,
+            DiscoveryInfo.Visibility visibility,
+            Resource r) {
         DiscoveryInfo.Builder discoveryInfoBuilder = DiscoveryInfo.newBuilder()
-                .setVisibility(DiscoveryInfo.Visibility.EXTERNAL)
+                .setVisibility(visibility)
                 .setName(taskName);
 
         discoveryInfoBuilder.getPortsBuilder().addPortsBuilder()
                 .setNumber((int) r.getRanges().getRange(0).getBegin())
-                .setProtocol("tcp")
+                .setProtocol(protocol)
                 .getLabelsBuilder()
                 .addLabels(getVIPLabel(vipName, vipPort));
 
@@ -372,7 +455,11 @@ public class ResourceUtils {
      * @param resource the resource to install on the task
      * @return the supplied builder, modified to include the resource
      */
-    public static TaskInfo.Builder setResource(TaskInfo.Builder builder, Resource resource) {
+    public static TaskInfo.Builder setResource(TaskInfo.Builder builder, Resource resource) throws TaskException {
+        if (resource.hasDisk()) {
+            return setDiskResource(builder, resource);
+        }
+
         for (int i = 0; i < builder.getResourcesCount(); ++i) {
             if (builder.getResources(i).getName().equals(resource.getName())) {
                 builder.setResources(i, resource);
@@ -383,6 +470,29 @@ public class ResourceUtils {
         throw new IllegalArgumentException(String.format(
                 "Task has no resource with name '%s': %s",
                 resource.getName(), TextFormat.shortDebugString(builder.build())));
+    }
+
+    private static TaskInfo.Builder setDiskResource(TaskInfo.Builder builder, Resource resource) throws TaskException {
+        if (!resource.hasDisk() || !resource.getDisk().hasVolume()) {
+            throw new IllegalArgumentException(String.format("Resource should have a disk with a volume."));
+        }
+
+        String resourceContainerPath = resource.getDisk().getVolume().getContainerPath();
+        OptionalInt index = IntStream.range(0, builder.getResourcesCount())
+                .filter(i -> builder.getResources(i).hasDisk())
+                .filter(i -> builder.getResources(i).getDisk().hasVolume())
+                .filter(i -> resourceContainerPath.equals(
+                        builder.getResources(i).getDisk().getVolume().getContainerPath()))
+                .findFirst();
+
+        if (index.isPresent()) {
+            builder.setResources(index.getAsInt(), resource);
+            return builder;
+        } else {
+            throw new TaskException(String.format(
+                    "Task has no matching disk resource '%s': %s",
+                    resource, TextFormat.shortDebugString(builder.build())));
+        }
     }
 
     /**
@@ -405,16 +515,24 @@ public class ResourceUtils {
                         resourceName, TextFormat.shortDebugString(taskInfo)));
     }
 
-    public static ExecutorInfo.Builder setResource(ExecutorInfo.Builder builder, Resource resource) {
-        for (int i = 0; i < builder.getResourcesCount(); ++i) {
-            if (builder.getResources(i).getName().equals(resource.getName())) {
-                builder.setResources(i, resource);
+    /**
+     * This method gets the {@link Resource} with the supplied resourceName from the supplied {@link TaskInfo.Builder},
+     * throwing an {@link IllegalArgumentException} if not found.
+     * @param taskBuilder the task builder whose resource will be returned
+     * @param resourceName the resourceName of the resource to return
+     * @return the resource with the supplied resourceName
+     */
+    public static Resource getResource(TaskInfo.Builder taskBuilder, String resourceName) {
+        for (Resource r : taskBuilder.getResourcesList()) {
+            if (r.getName().equals(resourceName)) {
+                return r;
             }
         }
 
-        throw new IllegalArgumentException(String.format(
-                "Executor has no resource with name '%s': %s",
-                resource.getName(), TextFormat.shortDebugString(builder.build())));
+        throw new IllegalArgumentException(
+                String.format(
+                        "Task has no resource with name '%s': %s",
+                        resourceName, TextFormat.shortDebugString(taskBuilder)));
     }
 
     public static Resource getResource(ExecutorInfo executorInfo, String name) {
@@ -429,10 +547,74 @@ public class ResourceUtils {
                 name, TextFormat.shortDebugString(executorInfo)));
     }
 
+    /**
+     * This method gets the {@link Resource} with the supplied resourceName from the supplied
+     * {@link ExecutorInfo.Builder}, throwing an {@link IllegalArgumentException} if not found.
+     * @param executorBuilder the executor builder whose resource will be returned
+     * @param resourceName the resourceName of the resource to return
+     * @return the resource with the supplied resourceName
+     */
+    public static Resource getResource(ExecutorInfo.Builder executorBuilder, String resourceName) {
+        for (Resource r : executorBuilder.getResourcesList()) {
+            if (r.getName().equals(resourceName)) {
+                return r;
+            }
+        }
+
+        throw new IllegalArgumentException(
+                String.format(
+                        "Task has no resource with name '%s': %s",
+                        resourceName, TextFormat.shortDebugString(executorBuilder)));
+    }
+
+    /**
+     * This method gets the existing {@link Resource.Builder} on the {@link TaskInfo.Builder} that has the same name as
+     * the supplied resource. That resource serves as a default value if no such builder exists on the task builder, and
+     * the return value in this case will be a resource builder created from that resource but attached to the task
+     * builder.
+     * @param taskBuilder the task builder to get the resource builder from
+     * @param resource the resource to get the name from or to use as template if no such builder exists on the task
+     * @return a resource builder attached to the task builder
+     */
+    public static Resource.Builder getResourceBuilder(TaskInfo.Builder taskBuilder, Resource resource) {
+        for (Resource.Builder r : taskBuilder.getResourcesBuilderList()) {
+            if (r.getName().equals(resource.getName())) {
+                return r;
+            }
+        }
+
+        return taskBuilder.addResourcesBuilder().mergeFrom(resource);
+    }
+
+    /**
+     * This method gets the existing {@link Resource.Builder} on the {@link ExecutorInfo.Builder} that has the same name
+     * as the supplied resource. That resource serves as a default value if no such builder exists on the executor
+     * builder, and the return value in this case will be a resource builder created from that resource but attached to
+     * the executor builder.
+     * @param executorBuilder the executor builder to get the resource builder from
+     * @param resource the resource to get the name from or to use as template if no such builder exists on the executor
+     * @return a resource builder attached to the executor builder
+     */
+    public static Resource.Builder getResourceBuilder(ExecutorInfo.Builder executorBuilder, Resource resource) {
+        for (Resource.Builder r : executorBuilder.getResourcesBuilderList()) {
+            if (r.getName().equals(resource.getName())) {
+                return r;
+            }
+        }
+
+        return executorBuilder.addResourcesBuilder().mergeFrom(resource);
+    }
+
     public static Resource mergeRanges(Resource lhs, Resource rhs) {
         return lhs.toBuilder().setRanges(
                 RangeAlgorithms.fromRangeList(RangeAlgorithms.mergeRanges(
                         lhs.getRanges().getRangeList(), rhs.getRanges().getRangeList()))).build();
+    }
+
+    public static Resource mergeRanges(Resource.Builder builder, Resource resource) {
+        return builder.setRanges(
+                RangeAlgorithms.fromRangeList(RangeAlgorithms.mergeRanges(
+                        builder.getRanges().getRangeList(), resource.getRanges().getRangeList()))).build();
     }
 
     private static List<Resource> clearResourceIds(List<Resource> resources) {
@@ -445,7 +627,7 @@ public class ResourceUtils {
         return clearedResources;
     }
 
-    private static Resource clearResourceId(Resource resource) {
+    public static Resource clearResourceId(Resource resource) {
         if (resource.hasReservation()) {
             List<Label> labels = resource.getReservation().getLabels().getLabelsList();
 
@@ -604,16 +786,52 @@ public class ResourceUtils {
                 .build();
     }
 
-    private static DiskInfo getExpectedRootVolumeDiskInfo(String persistenceId, String principal) {
+    private static DiskInfo getExpectedRootVolumeDiskInfo(
+            String persistenceId,
+            String containerPath,
+            String principal) {
         return DiskInfo.newBuilder()
                 .setPersistence(Persistence.newBuilder()
                         .setId(persistenceId)
                         .setPrincipal(principal)
+                        .build())
+                .setVolume(Volume.newBuilder()
+                        .setContainerPath(containerPath)
+                        .setMode(Volume.Mode.RW)
                         .build())
                 .build();
     }
 
     private static DiskInfo.Source getDesiredMountVolumeSource() {
         return Source.newBuilder().setType(Source.Type.MOUNT).build();
+    }
+
+    public static Resource setLabel(Resource resource, String key, String value) {
+        Resource.Builder builder = resource.toBuilder();
+        builder.getReservationBuilder().getLabelsBuilder().addLabelsBuilder().setKey(key).setValue(value);
+
+        return builder.build();
+    }
+
+    public static String getLabel(Resource resource, String key) {
+        for (Label l : resource.getReservation().getLabels().getLabelsList()) {
+            if (l.getKey().equals(key)) {
+                return l.getValue();
+            }
+        }
+
+        return null;
+    }
+
+    public static Resource removeLabel(Resource resource, String key) {
+        Resource.Builder builder = resource.toBuilder();
+        builder.getReservationBuilder().clearLabels();
+        for (Label l : resource.getReservation().getLabels().getLabelsList()) {
+            if (!l.getKey().equals(key)) {
+                builder.getReservationBuilder().getLabelsBuilder().addLabels(l);
+            }
+        }
+
+        return builder.build();
     }
 }

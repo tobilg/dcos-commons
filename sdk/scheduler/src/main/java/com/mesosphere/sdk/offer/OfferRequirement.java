@@ -4,7 +4,8 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.mesos.Protos;
 import org.apache.mesos.Protos.ExecutorInfo;
 import org.apache.mesos.Protos.TaskInfo;
-import com.mesosphere.sdk.offer.constrain.PlacementRule;
+
+import com.mesosphere.sdk.offer.evaluate.placement.PlacementRule;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -63,20 +64,7 @@ public class OfferRequirement {
             ExecutorRequirement executorRequirement,
             Optional<PlacementRule> placementRuleOptional) {
         return new OfferRequirement(
-                taskType, index, taskRequirements, Optional.of(executorRequirement), placementRuleOptional);
-    }
-
-    /**
-     * Creates a new {@link OfferRequirement} with provided executor requirement and empty placement constraints.
-     *
-     * @see #OfferRequirement(String, int, Collection, Optional, Optional)
-     */
-    public static OfferRequirement create(
-            String taskType,
-            int index,
-            Collection<TaskInfo> taskInfos,
-            Optional<ExecutorInfo> executorInfoOptional) throws InvalidRequirementException {
-        return create(taskType, index, taskInfos, executorInfoOptional, Optional.empty());
+                taskType, index, taskRequirements, Optional.ofNullable(executorRequirement), placementRuleOptional);
     }
 
     /**
@@ -84,9 +72,17 @@ public class OfferRequirement {
      *
      * @see #OfferRequirement(String, int, Collection, Optional, Optional)
      */
-    public static OfferRequirement create (String taskType, int index, Collection<TaskInfo> taskInfos)
+    public static OfferRequirement create(String taskType, int index, Collection<TaskInfo> taskInfos)
             throws InvalidRequirementException {
         return create(taskType, index, taskInfos, Optional.empty(), Optional.empty());
+    }
+
+    public static OfferRequirement create(
+            String taskType,
+            int index,
+            Collection<TaskRequirement> taskRequirements,
+            Optional<ExecutorRequirement> executorRequirement) throws InvalidRequirementException {
+        return new OfferRequirement(taskType, index, taskRequirements, executorRequirement, Optional.empty());
     }
 
     /**
@@ -97,7 +93,7 @@ public class OfferRequirement {
                 type, index, taskRequirements.values(), executorRequirementOptional, Optional.empty());
     }
 
-    private OfferRequirement(
+    public OfferRequirement(
             String type,
             int index,
             Collection<TaskRequirement> taskRequirements,
@@ -117,26 +113,6 @@ public class OfferRequirement {
 
     public int getIndex() {
         return index;
-    }
-
-    public TaskRequirement getTaskRequirement(String taskName) {
-        return taskRequirements.get(taskName);
-    }
-
-    public void updateTaskRequirement(String taskName, TaskInfo taskInfo) {
-        taskRequirements.get(taskName).update(taskInfo);
-    }
-
-    public void updateExecutorRequirement(ExecutorInfo executorInfo) {
-        if (executorRequirementOptional.isPresent()) {
-            try {
-                executorRequirementOptional = Optional.of(ExecutorRequirement.create(executorInfo));
-            } catch (InvalidRequirementException e) {
-                // TODO(mrb): Refactor to keep OfferRequirement completely immutable after creation.
-                // In the meantime, we know that creation succeeded previously, and that no operation in the evaluation
-                // logic will modify an ExecutorInfo in such a way as to make it invalid.
-            }
-        }
     }
 
     public Collection<TaskRequirement> getTaskRequirements() {
