@@ -21,6 +21,11 @@
     "MONGODB_MEM": "{{mongodb.mem}}",
     "MONGODB_DISK": "{{mongodb.disk}}",
     "MONGODB_REPLSET": "{{mongodb.replicaSetName}}",
+    "MONGODB_USER_ADMIN_USER": "{{mongodb.userAdminUser}}",
+    "MONGODB_USER_ADMIN_PASSWORD": "{{mongodb.userAdminPassword}}",
+    "MONGODB_CLUSTER_ADMIN_USER": "{{mongodb.clusterAdminUser}}",
+    "MONGODB_CLUSTER_ADMIN_PASSWORD": "{{mongodb.clusterAdminPassword}}",
+    "MONGODB_KEY": "{{mongodb.key}}",
     {{#mongodb.constraint}}
     "MONGODB_CONSTRAINT": "{{mongodb.constraint}}",
     {{/mongodb.constraint}}
@@ -39,20 +44,13 @@
   "uris": [
     "{{resource.assets.uris.jre-tar-gz}}",
     "{{resource.assets.uris.scheduler-zip}}",
-    "{{resource.assets.uris.libmesos-bundle-tar-gz}}"
+    "{{resource.assets.uris.libmesos-bundle-tar-gz}}",
+    "{{resource.assets.uris.bootstrap-zip}}"
   ],
   "upgradeStrategy":{
     "minimumHealthCapacity": 0,
     "maximumOverCapacity": 0
   },
-  "portDefinitions": [
-    {
-      "port": 0,
-      "protocol": "tcp",
-      "name": "api",
-      "labels": {}
-    }
-  ],
   "healthChecks": [
     {
       "gracePeriodSeconds": 120,
@@ -62,6 +60,14 @@
       "portIndex": 0,
       "protocol": "HTTP",
       "timeoutSeconds": 5
+    }
+  ],
+  "portDefinitions": [
+    {
+      "port": 0,
+      "protocol": "tcp",
+      "name": "api",
+      "labels": { "VIP_0": "/api.{{service.name}}:80" }
     }
   ]
 }

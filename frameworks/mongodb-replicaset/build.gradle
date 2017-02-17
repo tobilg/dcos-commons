@@ -23,19 +23,11 @@ dependencies {
     compile project(":scheduler")
     compile project(":executor")
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.21'
-    testCompile "junit:junit:${junitVer}"
-    testCompile "com.github.stefanbirkner:system-rules:${systemRulesVer}"
-    testCompile "org.mockito:mockito-all:${mockitoVer}"
+    testCompile project(":testing")
 }
 
-buildDir = new File(rootProject.projectDir, "build/")
-
-distributions {
-    main {
-        baseName = 'scheduler'
-        version = ''
-    }
-}
+distZip.dependsOn ":executor:distZip"
+distZip.finalizedBy copyExecutor
 
 test {
     filter {
@@ -44,5 +36,11 @@ test {
     }
 }
 
+distributions {
+    main {
+        baseName = 'scheduler'
+        version = ''
+    }
+}
 
 mainClassName = 'sh.serv.frameworks.mongodbreplicaset.scheduler.Main'

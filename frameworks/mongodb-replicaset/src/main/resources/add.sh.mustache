@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -m
+
+MONGODB_ENDPOINT="${LIBPROCESS_IP}:{{MONGODB_PORT}}"
+
+echo "Adding endpoint $MONGODB_ENDPOINT to the ReplicaSet"
+$MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo  --eval "rs.add('$MONGODB_ENDPOINT')"
+
+sleep {{ADD_DELAY}}

@@ -3,39 +3,49 @@
 set -m
 
 # Gather the MongoDB endpoints from the Marathon API like this: host1:27017
-curl -s -H "Content-Type: application/json" http://leader.mesos:5050/state | $MESOS_SANDBOX/jq-linux64 -r '.frameworks[] | select(.name | contains( "{{SERVICE_NAME}}")) | .tasks[] | select(.name | contains("server")) | .statuses[0].container_status.network_infos[0].ip_addresses[0].ip_address + ":{{MONGODB_PORT}}"' > mongodb-instances.txt
+#curl -s -H "Content-Type: application/json" http://leader.mesos:5050/state | $MESOS_SANDBOX/jq-linux64 -r '.frameworks[] | select(.name | contains( "{{SERVICE_NAME}}")) | .tasks[] | select(.name | contains("server")) | .statuses[0].container_status.network_infos[0].ip_addresses[0].ip_address + ":{{MONGODB_PORT}}"' > mongodb-instances.txt
 
 # Show contents of curl result
-echo "Found MongoDB instances:"
-cat mongodb-instances.txt
+#echo "Found MongoDB instances:"
+#cat mongodb-instances.txt
 
 # Read the MongoDB endpoints as array
-IFS=$'\n' read -d '' -r -a MONGODB_ENDPOINTS < mongodb-instances.txt
+#IFS=$'\n' read -d '' -r -a MONGODB_ENDPOINTS < mongodb-instances.txt
+
+MONGODB_ENDPOINT="127.0.0.1:{{MONGODB_PORT}}"
 
 echo "Printing the environment:"
 env
 
 # Check the replica set status. 1 means already initialized.
-REPLSET_STATUS=$($MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo --port {{MONGODB_PORT}} ${MONGODB_ENDPOINTS[0]} --quiet --eval "rs.status()" | sed -e 's/: [a-zA-Z]*(\(.*\))/: "\1"/' | sed -e 's/\"\"/\"/g' | $MESOS_SANDBOX/jq-linux64 -r '.ok')
+REPLSET_STATUS=$($MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo $MONGODB_ENDPOINT --quiet --eval "rs.status()" | sed -e 's/: [a-zA-Z]*(\(.*\))/: "\1"/' | sed -e 's/\"\"/\"/g' | $MESOS_SANDBOX/jq-linux64 -r '.ok')
+
+echo "ReplicaSet status: $REPLSET_STATUS"
 
 # Check if replica set has been initialized yet
 if [ "$REPLSET_STATUS" == "1" ]; then
     echo "The ReplicaSet has already been initialized!"
 else
-    echo "Using ${MONGODB_ENDPOINTS[0]} to initialize the ReplicaSet!"
+    echo "Using ${MONGODB_ENDPOINT} to initialize the ReplicaSet!"
 
     # Connect to the first endpoint and initilize the ReplicaSet
-    $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.initiate()"
+    $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo ${MONGODB_ENDPOINT} --eval "rs.initiate()"
 
     # Sleep for initiate delay
     sleep {{INITIATE_DELAY}}
 
+    # Create userAdminAnyDatabase user
+    $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "db.getSiblingDB('admin').createUser({user: '{{MONGODB_USER_ADMIN_USER}}', pwd: '{{MONGODB_USER_ADMIN_PASSWORD}}', roles: [ { role: 'userAdminAnyDatabase', db: 'admin' }]})"
+
+    # Create clusterAdmin user
+    $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo ${MONGODB_ENDPOINTS[0]} -u "{{MONGODB_CLUSTER_ADMIN_USER}}" -p "{{MONGODB_CLUSTER_ADMIN_PASSWORD}}" --authenticationDatabase "admin" --eval "db.getSiblingDB('admin').createUser({'user' : 'ravi', 'pwd' : 'changeme2', roles: [ { 'role' : 'clusterAdmin', 'db' : 'admin' } ]})"
+
     # Process the other nodes -> add to ReplicaSet
-    for endpoint in "${MONGODB_ENDPOINTS[@]:1}"; do
-        echo "Adding endpoint $endpoint to the ReplicaSet"
-        $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.add('$endpoint')"
-        sleep {{ADD_DELAY}}
-    done
+    #for endpoint in "${MONGODB_ENDPOINTS[@]:1}"; do
+    #    echo "Adding endpoint $endpoint to the ReplicaSet"
+    #    $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongo ${MONGODB_ENDPOINTS[0]} --eval "rs.add('$endpoint')"
+    #    sleep {{ADD_DELAY}}
+    #done
 
     # Check the ReplicaSet's status
     echo "Printing the ReplicaSet status:"

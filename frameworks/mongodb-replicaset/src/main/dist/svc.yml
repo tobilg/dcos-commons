@@ -1,29 +1,32 @@
 name: "{{SERVICE_NAME}}"
-principal: "{{SERVICE_NAME}}-principal"
-zookeeper: master.mesos:2181
-api-port: {{PORT0}}
+scheduler:
+  role: "{{SERVICE_NAME}}-role"
+  principal: "{{SERVICE_NAME}}-principal"
+  zookeeper: master.mesos:2181
+  api-port: {{PORT0}}
 pods:
   mongodb:
     count: {{MONGODB_COUNT}}
-    resource-sets:
-      mongodb-resources:
+    uris:
+      - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-{{MONGODB_VERSION}}.tgz"
+      - "https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64"
+      - "https://downloads.mesosphere.com/dcos-commons/artifacts/bootstrap.zip"
+    tasks:
+      server:
         cpus: {{MONGODB_CPUS}}
         memory: {{MONGODB_MEM}}
         ports:
-          - name: "mongodb-port"
+          mongodb-port:
             port: {{MONGODB_PORT}}
             vip:
               prefix: "mongodb"
               port: {{MONGODB_PORT}}
-        volumes:
-          - path: "mongodb-replicaset"
-            type: ROOT
-            size: {{MONGODB_DISK}}
-    tasks:
-      server:
-        resource-set: mongodb-resources
+        volume:
+          path: "mongodb-replicaset"
+          type: "ROOT"
+          size: {{MONGODB_DISK}}
         goal: RUNNING
-        cmd: "env && exec $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongod --bind_ip $LIBPROCESS_IP --port {{MONGODB_PORT}} --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}}"
+        cmd: "env && ./bootstrap -resolve=false && chmod 0400 $MESOS_SANDBOX/keyfile && exec $MESOS_SANDBOX/mongodb-linux-x86_64-{{MONGODB_VERSION}}/bin/mongod --bind_ip $LIBPROCESS_IP --port {{MONGODB_PORT}} --dbpath $MESOS_SANDBOX/mongodb-replicaset --replSet {{MONGODB_REPLSET}} --keyFile $MESOS_SANDBOX/keyfile"
         health-check:
           cmd: "curl --fail ${LIBPROCESS_IP}:{{MONGODB_PORT}} > /dev/null"
           interval: 30
@@ -31,37 +34,50 @@ pods:
           max-consecutive-failures: 5
           delay: 5
           timeout: 5
-        uris:
-          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-{{MONGODB_VERSION}}.tgz"
-
-  init:
-    count: {{INIT_COUNT}}
-    tasks:
-      replicaset:
+        configs:
+          keyfile:
+            template: "{{CONFIG_TEMPLATE_PATH}}/keyfile.mustache"
+            dest: "$MESOS_SANDBOX/keyfile"
+        env:
+          MONGODB_KEY: {{MONGODB_KEY}}
+      init:
         cpus: {{INIT_CPUS}}
         memory: {{INIT_MEM}}
         goal: FINISHED
-        cmd: "chmod +x $MESOS_SANDBOX/init.sh && chmod +x $MESOS_SANDBOX/jq-linux64 && exec $MESOS_SANDBOX/init.sh"
-        uris:
-          - "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-{{MONGODB_VERSION}}.tgz"
-          - "https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64"
-        configurations:
-          - template: "{{CONFIG_TEMPLATE_PATH}}/init.sh.mustache"
-            dest: "init.sh"
+        cmd: "./bootstrap -resolve=false && chmod +x $MESOS_SANDBOX/init.sh && chmod +x $MESOS_SANDBOX/jq-linux64 && exec $MESOS_SANDBOX/init.sh"
+        configs:
+          init:
+            template: "{{CONFIG_TEMPLATE_PATH}}/init.sh.mustache"
+            dest: "$MESOS_SANDBOX/init.sh"
         env:
           SERVICE_NAME: {{SERVICE_NAME}}
           INITIATE_DELAY: {{INIT_INITIATE_DELAY}}
           ADD_DELAY: {{INIT_ADD_DELAY}}
           MONGODB_VERSION: {{MONGODB_VERSION}}
           MONGODB_PORT: {{MONGODB_PORT}}
+      add:
+        cpus: {{INIT_CPUS}}
+        memory: {{INIT_MEM}}
+        goal: FINISHED
+        cmd: "./bootstrap -resolve=false && chmod +x $MESOS_SANDBOX/add.sh && chmod +x $MESOS_SANDBOX/jq-linux64 && exec $MESOS_SANDBOX/add.sh"
+        configs:
+          add:
+            template: "{{CONFIG_TEMPLATE_PATH}}/add.sh.mustache"
+            dest: "$MESOS_SANDBOX/add.sh"
+        env:
+          SERVICE_NAME: {{SERVICE_NAME}}
+          ADD_DELAY: {{INIT_ADD_DELAY}}
+          MONGODB_PORT: {{MONGODB_PORT}}
 
 plans:
   deploy:
     strategy: serial
     phases:
-      mongodb-deploy:
-        strategy: parallel
-        pod: mongodb
-      init-deploy:
+      partial-custom:
         strategy: serial
-        pod: init
+        pod: mongodb
+        steps:
+          - 0: [[server], [init]]
+          - 1: [[server], [add]]
+          - 2: [[server], [add]]
+          - default: [[server], [add]]
